@@ -1,1 +1,10 @@
 .env
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+frontend/node_modules/
+src/patzer/web/static/dist/
+stockfish/
+data/
