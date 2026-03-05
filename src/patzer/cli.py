@@ -33,11 +33,22 @@ def cli() -> None:
 @click.argument("username")
 @click.option("--source", default="lichess", type=click.Choice(["lichess", "chesscom"]), show_default=True)
 @click.option("--max-games", default=50, show_default=True)
+@click.option("--force", is_flag=True, default=False, help="Delete existing games/positions for this player and re-analyse.")
 @click.option("--db-path", default=None, help="Override database path")
-def import_games(username: str, source: str, max_games: int, db_path: str | None) -> None:
+def import_games(username: str, source: str, max_games: int, force: bool, db_path: str | None) -> None:
     """Fetch, analyse, and store games for USERNAME."""
     resolved_db = Path(db_path) if db_path else DB_PATH
     db = init_db(resolved_db)
+
+    if force:
+        row = db.execute("SELECT id FROM players WHERE username = ?", (username,)).fetchone()
+        if row:
+            player_id = row["id"]
+            db.execute("DELETE FROM positions WHERE game_id IN (SELECT id FROM games WHERE player_id = ?)", (player_id,))
+            db.execute("DELETE FROM games WHERE player_id = ?", (player_id,))
+            db.execute("DELETE FROM player_themes WHERE player_id = ?", (player_id,))
+            db.commit()
+            click.echo(f"Cleared existing data for {username}.")
 
     click.echo(f"Fetching up to {max_games} games for {username} from {source}...")
 
@@ -54,17 +65,21 @@ def import_games(username: str, source: str, max_games: int, db_path: str | None
     total_errors = 0
     theme_counts: dict[str, int] = {}
     games_analysed = 0
+    parse_failures = 0
+    store_failures = 0
 
     with click.progressbar(pgn_texts, label="Analysing games") as bar:
         for pgn_text in bar:
             game = parse_pgn(pgn_text, username, source)
             if game is None:
+                parse_failures += 1
                 continue
 
             # Store game in DB
-            game_db_id = _store_game(db, player_id, game)
+            game_db_id, store_err = _store_game(db, player_id, game)
             if game_db_id is None:
-                continue  # duplicate
+                store_failures += 1
+                continue  # duplicate or error
 
             # Analyse with Stockfish
             try:
@@ -108,6 +123,10 @@ def import_games(username: str, source: str, max_games: int, db_path: str | None
             games_analysed += 1
 
     click.echo(f"\nAnalysed {games_analysed} games, found {total_errors} errors across {len(theme_counts)} themes.")
+    if parse_failures:
+        click.echo(f"  Skipped {parse_failures} games: failed to parse PGN", err=True)
+    if store_failures:
+        click.echo(f"  Skipped {store_failures} games: already analysed or DB error", err=True)
     if theme_counts:
         click.echo("\nTop themes:")
         for theme, count in sorted(theme_counts.items(), key=lambda x: -x[1])[:5]:
@@ -233,6 +252,19 @@ def train(username: str, count: int, db_path: str | None) -> None:
     click.echo(f"\nSession complete: {correct_count}/{len(puzzles)} correct.")
 
 
+@cli.command("review")
+@click.option("--port", default=5000, show_default=True)
+@click.option("--host", default="127.0.0.1", show_default=True)
+@click.option("--db-path", default=None, help="Override database path")
+def review(port: int, host: str, db_path: str | None) -> None:
+    """Launch the game review web UI."""
+    resolved_db = Path(db_path) if db_path else DB_PATH
+    from .web import create_app
+    app = create_app(db_path=resolved_db)
+    click.echo(f"Patzer Review → http://{host}:{port}")
+    app.run(host=host, port=port, debug=False)
+
+
 @cli.command("status")
 @click.option("--username", required=True)
 @click.option("--db-path", default=None, help="Override database path")
@@ -269,7 +301,8 @@ def _ensure_player(db: sqlite3.Connection, username: str, source: str) -> None:
     db.commit()
 
 
-def _store_game(db: sqlite3.Connection, player_id: int, game: Game) -> int | None:
+def _store_game(db: sqlite3.Connection, player_id: int, game: Game) -> tuple[int | None, str | None]:
+    """Insert the game; if it already exists and is unanalysed, return its id for re-analysis."""
     played_at = game.headers.get("UTCDate", game.headers.get("Date", ""))
     try:
         db.execute(
@@ -279,13 +312,19 @@ def _store_game(db: sqlite3.Connection, player_id: int, game: Game) -> int | Non
              game.time_control, played_at or None, game.pgn_text),
         )
         db.commit()
-        row = db.execute(
-            "SELECT id FROM games WHERE game_id = ? AND source = ?",
-            (game.game_id, game.source),
-        ).fetchone()
-        return row["id"] if row else None
     except Exception:
-        return None
+        # Already exists — fall through to the SELECT below
+        pass
+
+    row = db.execute(
+        "SELECT id, analysed FROM games WHERE game_id = ? AND source = ?",
+        (game.game_id, game.source),
+    ).fetchone()
+    if row is None:
+        return (None, "game not found after insert")
+    if row["analysed"]:
+        return (None, None)  # already done, skip
+    return (row["id"], None)
 
 
 def _primary_theme(themes_str: str) -> str:
