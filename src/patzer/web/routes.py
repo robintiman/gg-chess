@@ -60,7 +60,8 @@ def get_game(game_db_id: int):
 
     error_rows = db.execute(
         """
-        SELECT fen_before, fen_after, player_move, best_move, eval_drop_cp, themes, move_number
+        SELECT fen_before, fen_after, player_move, best_move, eval_drop_cp,
+               pv_san, concept_name, concept_explanation, move_number
         FROM positions
         WHERE game_id = ?
         ORDER BY move_number
@@ -118,7 +119,7 @@ def ask_claude():
     player_move = data.get("player_move", "")
     best_move = data.get("best_move", "")
     eval_drop_cp = data.get("eval_drop_cp", 0)
-    themes = data.get("themes", "")
+    concept_name = data.get("concept_name", "")
     question = data.get("question", "")
 
     if not question:
@@ -130,7 +131,7 @@ Position (FEN): {fen}
 Player's move (UCI): {player_move}
 Best move (UCI): {best_move}
 Evaluation drop: {eval_drop_cp} centipawns
-Tactical/strategic themes: {themes}
+Concept: {concept_name}
 
 Player's question: {question}
 

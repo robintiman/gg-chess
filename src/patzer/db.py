@@ -33,7 +33,9 @@ CREATE TABLE IF NOT EXISTS positions (
     player_move TEXT NOT NULL,
     best_move TEXT NOT NULL,
     eval_drop_cp INTEGER NOT NULL,
-    themes TEXT NOT NULL DEFAULT ''
+    pv_san TEXT NOT NULL DEFAULT '',
+    concept_name TEXT NOT NULL DEFAULT '',
+    concept_explanation TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS player_themes (

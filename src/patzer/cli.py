@@ -13,11 +13,9 @@ from .ingestion import lichess as lichess_client
 from .ingestion import chesscom as chesscom_client
 from .ingestion.parser import Game, parse_pgn
 from .analysis.engine import analyse_game, ErrorPosition
-from .analysis.structural import detect_themes
 from .player_model import (
     ThemePerformance,
     get_all_theme_performance,
-    upsert_theme_error,
     upsert_theme_result,
 )
 from .training.puzzle_db import Puzzle, load_puzzle_db
@@ -63,7 +61,6 @@ def import_games(username: str, source: str, max_games: int, force: bool, db_pat
     player_id = db.execute("SELECT id FROM players WHERE username = ?", (username,)).fetchone()["id"]
 
     total_errors = 0
-    theme_counts: dict[str, int] = {}
     games_analysed = 0
     parse_failures = 0
     store_failures = 0
@@ -88,33 +85,26 @@ def import_games(username: str, source: str, max_games: int, force: bool, db_pat
                 click.echo(f"\nWarning: engine error for game {game.game_id}: {e}", err=True)
                 errors = []
 
-            # Tag themes and store positions
+            # Store positions with Claude-identified concepts
             for err in errors:
-                board = chess.Board(err.fen_before)
-                best_move = chess.Move.from_uci(err.best_move)
-                themes = detect_themes(board, best_move)
+                concept_name = ""
+                concept_explanation = ""
+                try:
+                    from .analysis.strategic import identify_concept
+                    concept_name, concept_explanation = identify_concept(err, game)
+                except Exception:
+                    pass
 
-                # Strategic themes for large blunders
-                if err.eval_drop_cp >= 200:
-                    try:
-                        from .analysis.strategic import detect_strategic_themes
-                        strategic = detect_strategic_themes(err, game)
-                        themes.extend(strategic)
-                    except Exception:
-                        pass
-
-                themes_str = " ".join(themes)
+                pv_str = " ".join(err.pv_san)
                 db.execute(
                     """INSERT OR IGNORE INTO positions
-                       (game_id, move_number, fen_before, fen_after, player_move, best_move, eval_drop_cp, themes)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                       (game_id, move_number, fen_before, fen_after, player_move, best_move,
+                        eval_drop_cp, pv_san, concept_name, concept_explanation)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (game_db_id, err.move_number, err.fen_before, err.fen_after,
-                     err.player_move, err.best_move, err.eval_drop_cp, themes_str),
+                     err.player_move, err.best_move, err.eval_drop_cp,
+                     pv_str, concept_name, concept_explanation),
                 )
-
-                for theme in themes:
-                    upsert_theme_error(db, username, theme)
-                    theme_counts[theme] = theme_counts.get(theme, 0) + 1
 
                 total_errors += 1
 
@@ -122,15 +112,11 @@ def import_games(username: str, source: str, max_games: int, force: bool, db_pat
             db.commit()
             games_analysed += 1
 
-    click.echo(f"\nAnalysed {games_analysed} games, found {total_errors} errors across {len(theme_counts)} themes.")
+    click.echo(f"\nAnalysed {games_analysed} games, found {total_errors} errors.")
     if parse_failures:
         click.echo(f"  Skipped {parse_failures} games: failed to parse PGN", err=True)
     if store_failures:
         click.echo(f"  Skipped {store_failures} games: already analysed or DB error", err=True)
-    if theme_counts:
-        click.echo("\nTop themes:")
-        for theme, count in sorted(theme_counts.items(), key=lambda x: -x[1])[:5]:
-            click.echo(f"  {theme}: {count}")
 
 
 @cli.command("import-puzzles")

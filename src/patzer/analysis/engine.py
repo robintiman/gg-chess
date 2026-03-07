@@ -20,6 +20,7 @@ class ErrorPosition:
     player_move: str  # UCI
     best_move: str    # UCI
     eval_drop_cp: int
+    pv_san: list[str]  # Best line in SAN notation (from position before player's move)
 
 
 def analyse_game(game: Game, depth: int = STOCKFISH_DEPTH) -> list[ErrorPosition]:
@@ -56,6 +57,15 @@ def analyse_game(game: Game, depth: int = STOCKFISH_DEPTH) -> list[ErrorPosition
             score_before = _score_from_player_pov(info_before["score"], player_is_white)
             best_move_obj = info_before.get("pv", [None])[0]
 
+            pv_san: list[str] = []
+            temp_board = board.copy()
+            for pv_move in info_before.get("pv", [])[:8]:
+                try:
+                    pv_san.append(temp_board.san(pv_move))
+                    temp_board.push(pv_move)
+                except Exception:
+                    break
+
             board.push(move)
             fen_after = board.fen()
 
@@ -78,6 +88,7 @@ def analyse_game(game: Game, depth: int = STOCKFISH_DEPTH) -> list[ErrorPosition
                         player_move=player_move_uci,
                         best_move=best_move_uci,
                         eval_drop_cp=drop,
+                        pv_san=pv_san,
                     ))
 
     return errors
