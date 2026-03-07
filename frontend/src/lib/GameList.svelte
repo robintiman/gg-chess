@@ -1,13 +1,15 @@
 <script>
+  import { onMount } from "svelte";
   import { games, currentGame, history, currentIndex, currentAnalysis, chatMessages } from "../stores.js";
   import { Chess } from "chess.js";
 
-  let username = "";
+  const username = "jumpyfile";
   let loading = false;
   let error = "";
 
+  onMount(() => fetchGames());
+
   async function fetchGames() {
-    if (!username.trim()) return;
     loading = true;
     error = "";
     try {
@@ -78,16 +80,9 @@
       <span class="game-count">{$games.length}</span>
     {/if}
   </div>
-  <div class="search">
-    <input
-      bind:value={username}
-      placeholder="Chess.com / Lichess username"
-      on:keydown={(e) => e.key === "Enter" && fetchGames()}
-    />
-    <button on:click={fetchGames} disabled={loading}>
-      {loading ? "…" : "Load"}
-    </button>
-  </div>
+  {#if loading}
+    <div class="loading-hint">Loading games…</div>
+  {/if}
 
   {#if error}
     <p class="error">{error}</p>
@@ -153,39 +148,12 @@
     border-radius: 10px;
     padding: 1px 7px;
   }
-  .search {
-    display: flex;
-    gap: 6px;
-    padding: 4px 10px 8px;
+  .loading-hint {
+    padding: 4px 12px 8px;
+    font-size: 12px;
+    color: var(--text-dim);
     flex-shrink: 0;
   }
-  input {
-    flex: 1;
-    padding: 7px 10px;
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--text);
-    font-size: 13px;
-    font-family: var(--font-ui);
-    outline: none;
-    transition: border-color 0.15s;
-  }
-  input:focus { border-color: var(--accent); }
-  input::placeholder { color: var(--text-dim); }
-  button {
-    padding: 7px 12px;
-    background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    color: var(--text-muted);
-    cursor: pointer;
-    font-size: 13px;
-    font-family: var(--font-ui);
-    transition: background 0.15s, color 0.15s;
-  }
-  button:hover:not(:disabled) { background: var(--border); color: var(--text); }
-  button:disabled { opacity: 0.5; cursor: default; }
   ul {
     list-style: none;
     margin: 0;
