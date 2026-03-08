@@ -60,8 +60,4 @@ def _is_skippable(pgn_text: str) -> bool:
         if tc in ("-", "1/86400", "1/172800"):
             return True
 
-    rated_match = re.search(r'\[Rated "([^"]+)"\]', pgn_text)
-    if rated_match and rated_match.group(1).lower() == "false":
-        return True
-
     return False

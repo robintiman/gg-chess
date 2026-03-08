@@ -110,7 +110,7 @@ def sync_games():
     def generate():
         import sqlite3
 
-        from ..ingestion.lichess import fetch_games
+        from ..ingestion.chesscom import fetch_games
         from ..ingestion.parser import parse_pgn
 
         def send(event_type, **kwargs):
@@ -120,12 +120,12 @@ def sync_games():
         db.row_factory = sqlite3.Row
 
         try:
-            yield send("status", message="Fetching games from Lichess…")
+            yield send("status", message="Fetching games from Chess.com…")
             pgn_list = fetch_games(username, max_games)
 
             db.execute(
                 "INSERT OR IGNORE INTO players (username, source) VALUES (?, ?)",
-                (username, "lichess"),
+                (username, "chesscom"),
             )
             db.commit()
             player_id = db.execute(
@@ -134,12 +134,13 @@ def sync_games():
 
             new_games = 0
             for pgn_text in pgn_list:
-                game = parse_pgn(pgn_text, username, "lichess")
+                game = parse_pgn(pgn_text, username, "chesscom")
                 if game is None:
                     continue
-                played_at = (
-                    game.headers.get("UTCDate", "") + " " + game.headers.get("UTCTime", "")
-                ).strip()
+                # Chess.com uses [Date "YYYY.MM.DD"] and [StartTime "HH:MM:SS"]
+                date = game.headers.get("Date", game.headers.get("UTCDate", "")).replace(".", "-")
+                time_ = game.headers.get("StartTime", game.headers.get("UTCTime", ""))
+                played_at = (date + " " + time_).strip()
                 cur = db.execute(
                     """INSERT OR IGNORE INTO games
                        (player_id, game_id, source, result, time_control, played_at, pgn_text, analysed)
@@ -192,7 +193,7 @@ def analyse_game_route(game_db_id: int):
                 yield send("error", message="Game not found")
                 return
 
-            game = parse_pgn(row["pgn_text"], row["username"], "lichess")
+            game = parse_pgn(row["pgn_text"], row["username"], "chesscom")
             if game is None:
                 yield send("error", message="Could not parse PGN")
                 return
