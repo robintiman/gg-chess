@@ -27,7 +27,27 @@
         --radius-sm: 4px;
       }
       body { background: var(--bg); color: var(--text); font-family: var(--font-ui); font-size: 15px; }
-      * { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+      * {
+        scrollbar-width: thin;
+        scrollbar-color: #3a3a3a transparent;
+      }
+      *::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      *::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      *::-webkit-scrollbar-thumb {
+        background: #3a3a3a;
+        border-radius: 99px;
+      }
+      *::-webkit-scrollbar-thumb:hover {
+        background: #4e4e4e;
+      }
+      *::-webkit-scrollbar-corner {
+        background: transparent;
+      }
     </style>
   </head>
   <body>
