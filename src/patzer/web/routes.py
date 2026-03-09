@@ -1,5 +1,6 @@
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import chess
@@ -7,7 +8,7 @@ import chess.engine
 import anthropic
 from flask import Blueprint, Response, current_app, g, jsonify, request, stream_with_context
 
-from ..config import ANTHROPIC_API_KEY, CLAUDE_MODEL, STOCKFISH_PATH
+from ..config import ANTHROPIC_API_KEY, CLAUDE_CHAT_MODEL, STOCKFISH_PATH
 from ..db import init_db
 
 bp = Blueprint("api", __name__, url_prefix="/api")
@@ -199,8 +200,15 @@ def analyse_game_route(game_db_id: int):
                 return
 
             yield send("status", message="Running Stockfish analysis…")
+            errors = []
             try:
-                errors = analyse_game(game)
+                for event in analyse_game(game):
+                    if event["type"] == "progress":
+                        yield send("analyzing_move",
+                                   half_move_index=event["half_move_index"],
+                                   san=event["san"])
+                    elif event["type"] == "done":
+                        errors = event["errors"]
             except Exception as e:
                 yield send("error", message=f"Engine error: {e}")
                 return
@@ -209,24 +217,35 @@ def analyse_game_route(game_db_id: int):
 
             db.execute("DELETE FROM positions WHERE game_id = ?", (game_db_id,))
 
-            for err in errors:
+            def call_concept(err):
                 try:
-                    concept_name, concept_explanation = identify_concept(err, game)
+                    return err, identify_concept(err, game)
                 except Exception as e:
                     import traceback
                     print(f"[identify_concept] error at move {err.move_number}: {e}")
                     traceback.print_exc()
-                    concept_name, concept_explanation = "", ""
+                    return err, ("", "")
 
-                db.execute(
-                    """INSERT INTO positions
-                       (game_id, move_number, fen_before, fen_after, player_move, best_move,
-                        eval_drop_cp, pv_san, concept_name, concept_explanation)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (game_db_id, err.move_number, err.fen_before, err.fen_after,
-                     err.player_move, err.best_move, err.eval_drop_cp,
-                     " ".join(err.pv_san), concept_name, concept_explanation),
-                )
+            with ThreadPoolExecutor(max_workers=10) as pool:
+                future_to_err = {pool.submit(call_concept, err): err for err in errors}
+                for future in as_completed(future_to_err):
+                    err, (concept_name, concept_explanation) = future.result()
+                    db.execute(
+                        """INSERT INTO positions
+                           (game_id, move_number, fen_before, fen_after, player_move, best_move,
+                            eval_drop_cp, pv_san, concept_name, concept_explanation)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (game_db_id, err.move_number, err.fen_before, err.fen_after,
+                         err.player_move, err.best_move, err.eval_drop_cp,
+                         " ".join(err.pv_san), concept_name, concept_explanation),
+                    )
+                    yield send("concept_identified",
+                               move_number=err.move_number,
+                               half_move_index=err.half_move_index,
+                               player_move=err.player_move,
+                               fen_before=err.fen_before,
+                               eval_drop_cp=err.eval_drop_cp,
+                               concept_name=concept_name)
 
             db.execute("UPDATE games SET analysed = 1 WHERE id = ?", (game_db_id,))
             db.commit()
@@ -303,7 +322,7 @@ Provide a clear, educational explanation focused on chess improvement. Be concis
     def generate():
         client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         with client.messages.stream(
-            model=CLAUDE_MODEL,
+            model=CLAUDE_CHAT_MODEL,
             max_tokens=1024,
             messages=[{"role": "user", "content": prompt}],
         ) as stream:

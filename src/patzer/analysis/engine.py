@@ -10,6 +10,7 @@ from ..ingestion.parser import Game
 
 OPENING_MOVES_SKIP = 5
 MAX_ERRORS_PER_GAME = 50
+AFTER_MOVE_DEPTH = 12  # Lower depth is sufficient for blunder detection eval
 
 
 @dataclass
@@ -22,12 +23,19 @@ class ErrorPosition:
     eval_drop_cp: int
     pv_san: list[str]       # Best line in SAN notation (from position before player's move)
     alt_pvs_san: list[list[str]] = field(default_factory=list)  # 2nd and 3rd best lines
+    half_move_index: int = 0  # 1-based index into the game's half-move sequence
 
 
-def analyse_game(game: Game, depth: int = STOCKFISH_DEPTH) -> list[ErrorPosition]:
+def analyse_game(game: Game, depth: int = STOCKFISH_DEPTH):
+    """Generator that yields dicts:
+      {"type": "progress", "half_move_index": int, "san": str}
+      {"type": "done", "errors": list[ErrorPosition]}
+    half_move_index is 1-based and maps directly to history[N] in the frontend.
+    """
     pgn_game = chess.pgn.read_game(io.StringIO(game.pgn_text))
     if pgn_game is None:
-        return []
+        yield {"type": "done", "errors": []}
+        return
 
     player_is_white = game.player_color == "white"
     errors: list[ErrorPosition] = []
@@ -35,9 +43,11 @@ def analyse_game(game: Game, depth: int = STOCKFISH_DEPTH) -> list[ErrorPosition
     with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as engine:
         board = pgn_game.board()
         move_number = 0
+        half_move_index = 0
 
         for node in pgn_game.mainline():
             move = node.move
+            half_move_index += 1
             is_player_turn = board.turn == chess.WHITE if player_is_white else board.turn == chess.BLACK
 
             if not is_player_turn:
@@ -45,6 +55,11 @@ def analyse_game(game: Game, depth: int = STOCKFISH_DEPTH) -> list[ErrorPosition
                 continue
 
             move_number += 1
+            san = board.san(move)
+
+            # Yield progress so the frontend can navigate the board to this position
+            yield {"type": "progress", "half_move_index": half_move_index, "san": san}
+
             if move_number <= OPENING_MOVES_SKIP:
                 board.push(move)
                 continue
@@ -80,33 +95,37 @@ def analyse_game(game: Game, depth: int = STOCKFISH_DEPTH) -> list[ErrorPosition
                         break
                 alt_pvs_san.append(alt_pv)
 
+            player_move_uci = move.uci()
+            best_move_uci = best_move_obj.uci() if best_move_obj is not None else None
+
             board.push(move)
             fen_after = board.fen()
 
-            info_after = engine.analyse(board, chess.engine.Limit(depth=depth))
+            # Skip "after" analysis when the player played the best move — can't be a blunder
+            if best_move_uci is None or player_move_uci == best_move_uci:
+                continue
+
+            info_after = engine.analyse(board, chess.engine.Limit(depth=AFTER_MOVE_DEPTH))
             score_after = _score_from_player_pov(info_after["score"], player_is_white)
             # Negate because now it's opponent's turn
             score_after = -score_after
 
             drop = score_before - score_after
 
-            if drop >= BLUNDER_THRESHOLD_CP and best_move_obj is not None:
-                player_move_uci = move.uci()
-                best_move_uci = best_move_obj.uci()
+            if drop >= BLUNDER_THRESHOLD_CP:
+                errors.append(ErrorPosition(
+                    move_number=move_number,
+                    fen_before=fen_before,
+                    fen_after=fen_after,
+                    player_move=player_move_uci,
+                    best_move=best_move_uci,
+                    eval_drop_cp=drop,
+                    pv_san=pv_san,
+                    alt_pvs_san=alt_pvs_san,
+                    half_move_index=half_move_index,
+                ))
 
-                if player_move_uci != best_move_uci:
-                    errors.append(ErrorPosition(
-                        move_number=move_number,
-                        fen_before=fen_before,
-                        fen_after=fen_after,
-                        player_move=player_move_uci,
-                        best_move=best_move_uci,
-                        eval_drop_cp=drop,
-                        pv_san=pv_san,
-                        alt_pvs_san=alt_pvs_san,
-                    ))
-
-    return errors
+    yield {"type": "done", "errors": errors}
 
 
 def _score_from_player_pov(score: chess.engine.PovScore, player_is_white: bool) -> int:

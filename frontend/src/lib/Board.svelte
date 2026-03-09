@@ -4,9 +4,29 @@
   import { currentFen, currentAnalysis, currentError } from "../stores.js";
 
   export let flipped = false;
+  export let blunderFlash = null; // { square: "e5", key: number }
 
   let el;
   let cg;
+
+  const SQUARE_SIZE = 80; // board is 640px / 8
+
+  function blunderSquareStyle(square, isFlipped) {
+    if (!square || square.length < 2) return null;
+    const file = square.charCodeAt(0) - 97; // a=0 … h=7
+    const rank = parseInt(square[1]);        // 1-8
+    let left, top;
+    if (!isFlipped) {
+      left = file * SQUARE_SIZE;
+      top = (8 - rank) * SQUARE_SIZE;
+    } else {
+      left = (7 - file) * SQUARE_SIZE;
+      top = (rank - 1) * SQUARE_SIZE;
+    }
+    return `left:${left}px;top:${top}px;width:${SQUARE_SIZE}px;height:${SQUARE_SIZE}px;`;
+  }
+
+  $: blunderStyle = blunderFlash ? blunderSquareStyle(blunderFlash.square, flipped) : null;
 
   const fileLetters = ["a", "b", "c", "d", "e", "f", "g", "h"];
   const rankNumbers = ["8", "7", "6", "5", "4", "3", "2", "1"];
@@ -98,6 +118,13 @@
     </div>
     <div class="board-wrap">
       <div bind:this={el} class="cg-board-wrap"></div>
+      {#if blunderStyle}
+        {#key blunderFlash.key}
+          <div class="blunder-overlay" style={blunderStyle}>
+            <div class="blunder-badge">??</div>
+          </div>
+        {/key}
+      {/if}
     </div>
   </div>
 </div>
@@ -168,6 +195,7 @@
     user-select: none;
   }
   .board-wrap {
+    position: relative;
     display: flex;
     justify-content: center;
     align-items: center;
@@ -175,5 +203,57 @@
   .cg-board-wrap {
     width: 640px;
     height: 640px;
+  }
+  .blunder-overlay {
+    position: absolute;
+    pointer-events: none;
+    z-index: 20;
+    border: 3px solid rgba(231, 76, 60, 0.9);
+    border-radius: 3px;
+    background: rgba(231, 76, 60, 0.18);
+    animation: blunder-glow 0.7s ease-in-out infinite;
+    box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.6);
+  }
+  .blunder-overlay::before,
+  .blunder-overlay::after {
+    content: '';
+    position: absolute;
+    inset: -5px;
+    border: 2px solid rgba(231, 76, 60, 0.7);
+    border-radius: 5px;
+    animation: blunder-ripple 1.4s ease-out infinite;
+  }
+  .blunder-overlay::after {
+    animation-delay: 0.7s;
+  }
+  @keyframes blunder-glow {
+    0%, 100% { background: rgba(231, 76, 60, 0.18); border-color: rgba(231, 76, 60, 0.9); }
+    50%       { background: rgba(231, 76, 60, 0.32); border-color: rgba(231, 76, 60, 0.6); }
+  }
+  @keyframes blunder-ripple {
+    0%   { transform: scale(1);   opacity: 0.7; }
+    100% { transform: scale(2.2); opacity: 0;   }
+  }
+  .blunder-badge {
+    position: absolute;
+    top: -13px;
+    right: -13px;
+    background: #e74c3c;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-mono);
+    box-shadow: 0 2px 6px rgba(231, 76, 60, 0.5);
+    animation: badge-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  }
+  @keyframes badge-pop {
+    0%   { transform: scale(0) rotate(-20deg); opacity: 0; }
+    100% { transform: scale(1) rotate(0deg);  opacity: 1; }
   }
 </style>

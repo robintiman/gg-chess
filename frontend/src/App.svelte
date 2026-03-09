@@ -7,18 +7,33 @@
   import ErrorPanel from "./lib/ErrorPanel.svelte";
   import Chat from "./lib/Chat.svelte";
   import { history, currentIndex, currentGame, currentAnalysis } from "./stores.js";
+  import { get } from "svelte/store";
 
   let activeTab = "errors";
   let flipped = false;
   let analysing = false;
   let analyseStatus = "";
   let analyseProgress = 0;
+  // Blunder flash: passed to Board for animated highlight
+  let blunderFlash = null; // { square: "e5", key: number }
+  let blunderFlashKey = 0;
+  // Concept toast shown during concept identification phase
+  let conceptToast = null; // { move_number, concept_name, player_move }
+  let conceptToastTimer = null;
+
+  function showConceptToast(data) {
+    clearTimeout(conceptToastTimer);
+    conceptToast = data;
+    conceptToastTimer = setTimeout(() => { conceptToast = null; }, 3000);
+  }
 
   async function analyseGame() {
     if (!$currentGame || analysing) return;
     analysing = true;
     analyseProgress = 5;
     analyseStatus = "Preparing position…";
+    blunderFlash = null;
+    conceptToast = null;
     try {
       const res = await fetch(`/api/analyse-game/${$currentGame.id}`, { method: "POST" });
       const reader = res.body.getReader();
@@ -34,6 +49,14 @@
           const match = chunk.match(/^data: (.+)$/m);
           if (!match) continue;
           const event = JSON.parse(match[1]);
+
+          if (event.type === "analyzing_move") {
+            // Advance board to position before this move (fen_before = half_move_index - 1)
+            currentIndex.set(Math.max(0, event.half_move_index - 1));
+            analyseStatus = `Analysing ${event.san}…`;
+            if (analyseProgress < 60) analyseProgress = Math.min(60, analyseProgress + 1);
+          }
+
           if (event.type === "status") {
             analyseStatus = event.message;
             if (event.message.toLowerCase().includes("stockfish")) {
@@ -42,10 +65,32 @@
               analyseProgress = 62;
             }
           }
+
+          if (event.type === "concept_identified") {
+            // Navigate to the blunder position
+            const idx = Math.max(0, event.half_move_index - 1);
+            currentIndex.set(idx);
+            // Flash the origin square of the bad move
+            const originSquare = event.player_move?.slice(0, 2) ?? null;
+            blunderFlash = originSquare ? { square: originSquare, key: ++blunderFlashKey } : null;
+            // Show concept toast
+            if (event.concept_name) {
+              showConceptToast({
+                move_number: event.move_number,
+                concept_name: event.concept_name,
+                player_move: event.player_move,
+              });
+            }
+            analyseStatus = `Move ${event.move_number}: ${event.concept_name || "mistake found"}`;
+            if (analyseProgress < 95) analyseProgress = Math.min(95, analyseProgress + 3);
+          }
+
           if (event.type === "error") analyseStatus = `Error: ${event.message}`;
           if (event.type === "done") {
             analyseProgress = 100;
             analyseStatus = "Analysis complete";
+            blunderFlash = null;
+            conceptToast = null;
             // Refresh current game to get errors
             const r = await fetch(`/api/game/${$currentGame.id}`);
             if (r.ok) {
@@ -62,6 +107,7 @@
       analyseStatus = `Error: ${e.message}`;
     } finally {
       analysing = false;
+      blunderFlash = null;
     }
   }
 
@@ -108,7 +154,7 @@
       <div class="board-row">
         <EvalBar />
         <div class="board-center">
-          <Board {flipped} />
+          <Board {flipped} {blunderFlash} />
         </div>
       </div>
       <div class="controls">
@@ -137,6 +183,15 @@
                        class:active></div>
                 {/each}
               </div>
+              {#if conceptToast}
+                {#key conceptToast.move_number + conceptToast.concept_name}
+                  <div class="concept-toast">
+                    <span class="toast-glyph">??</span>
+                    <span class="toast-move">Move {conceptToast.move_number}</span>
+                    <span class="toast-concept">{conceptToast.concept_name}</span>
+                  </div>
+                {/key}
+              {/if}
             </div>
           {:else}
             <button on:click={analyseGame} class="analyse-btn" title="Analyse game with Stockfish + Claude">
@@ -348,6 +403,41 @@
   @keyframes pulse-sq {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.5; }
+  }
+  .concept-toast {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    background: rgba(231, 76, 60, 0.12);
+    border: 1px solid rgba(231, 76, 60, 0.35);
+    border-radius: var(--radius-sm);
+    animation: toast-slide-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+    overflow: hidden;
+  }
+  @keyframes toast-slide-in {
+    0% { opacity: 0; transform: translateY(6px) scale(0.97); }
+    100% { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .toast-glyph {
+    font-size: 13px;
+    font-weight: 700;
+    color: #e74c3c;
+    font-family: var(--font-mono);
+    flex-shrink: 0;
+  }
+  .toast-move {
+    font-size: 12px;
+    color: var(--text-dim);
+    flex-shrink: 0;
+  }
+  .toast-concept {
+    font-size: 13px;
+    font-weight: 500;
+    color: #e07060;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .move-counter { font-size: 13px; color: var(--text-dim); min-width: 52px; text-align: center; }
   .analysis-col {
