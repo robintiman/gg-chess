@@ -1,11 +1,9 @@
-import json
-import re
 from pathlib import Path
 
 import anthropic
 import chess
 
-from ..config import ANTHROPIC_API_KEY, CLAUDE_MODEL
+from ..config import ANTHROPIC_API_KEY, CLAUDE_CONCEPT_MODEL
 from ..ingestion.parser import Game
 from .engine import ErrorPosition
 
@@ -58,33 +56,40 @@ Step 1 — Analyse the position: What are the key threats, weak squares, or tact
 Step 2 — Name the chess concept most clearly illustrated by the best line.
 Step 3 — Write a 1-2 sentence coach explanation mentioning specific moves. Write naturally, as a coach speaking directly to the player. Never mention engines or analysis tools.
 
-Only flag a concept if it is genuinely and clearly present — the best line should directly illustrate or set up the concept. Skip positions with no standout theme.
+Only flag a concept if it is genuinely and clearly present — the best line should directly illustrate or set up the concept. If no concept is clearly present, use empty strings for name and explanation."""
 
-Respond ONLY with valid JSON:
-{{"reasoning": "step-by-step analysis", "name": "concept name", "explanation": "1-2 sentences mentioning specific moves from the best line"}}
-
-If no concept is clearly present, respond with:
-{{"reasoning": "no clear concept", "name": "", "explanation": ""}}"""
+    tools = [
+        {
+            "name": "report_concept",
+            "description": "Report the chess concept identified in the position.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "reasoning": {"type": "string", "description": "Step-by-step analysis of the position"},
+                    "name": {"type": "string", "description": "Name of the chess concept, or empty string if none"},
+                    "explanation": {"type": "string", "description": "1-2 sentence coach explanation mentioning specific moves, or empty string if no concept"},
+                },
+                "required": ["reasoning", "name", "explanation"],
+            },
+        }
+    ]
 
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
     message = client.messages.create(
-        model=CLAUDE_MODEL,
-        max_tokens=512,
+        model=CLAUDE_CONCEPT_MODEL,
+        max_tokens=2048,
         temperature=0,
+        tools=tools,
+        tool_choice={"type": "tool", "name": "report_concept"},
         messages=[{"role": "user", "content": prompt}],
     )
 
-    raw = message.content[0].text.strip()
-    print(f"[identify_concept] raw response: {raw!r}")
+    print(f"[identify_concept] stop_reason={message.stop_reason}")
+    tool_use = next((b for b in message.content if b.type == "tool_use"), None)
+    if tool_use is None:
+        print("[identify_concept] no tool_use block in response")
+        return ("", "")
 
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as e:
-        print(f"[identify_concept] JSON parse error: {e}")
-        match = re.search(r'\{.*\}', raw, re.DOTALL)
-        if match:
-            data = json.loads(match.group())
-        else:
-            return ("", "")
-
+    data = tool_use.input
+    print(f"[identify_concept] response: {data!r}")
     return (data.get("name", ""), data.get("explanation", ""))

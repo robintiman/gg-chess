@@ -19,5 +19,6 @@ PUZZLE_CSV_PATH: Path = Path(
 
 STOCKFISH_DEPTH: int = 18
 BLUNDER_THRESHOLD_CP: int = 150
-CLAUDE_MODEL: str = "claude-opus-4-6"
+CLAUDE_CONCEPT_MODEL: str = "claude-haiku-4-5-20251001"  # Fast model for structured concept extraction
+CLAUDE_CHAT_MODEL: str = "claude-opus-4-6"               # High-quality model for interactive chat
 MULTI_PV_COUNT: int = 3

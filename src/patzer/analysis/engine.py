@@ -41,6 +41,7 @@ def analyse_game(game: Game, depth: int = STOCKFISH_DEPTH):
     errors: list[ErrorPosition] = []
 
     with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as engine:
+        engine.configure({"Threads": 4, "Hash": 256})
         board = pgn_game.board()
         move_number = 0
         half_move_index = 0
