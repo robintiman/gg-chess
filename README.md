@@ -1,4 +1,4 @@
-# Patzer
+# gg-chess
 
 **Your personal chess pattern library — built from your games, organised by theme, designed to fill the exact gaps in your knowledge.**
 
@@ -22,7 +22,7 @@ Generic puzzle queues serve everyone the same content regardless of individual g
 
 ## What Patzer Does
 
-Patzer analyses all your games to map which themes you handle well and which you don't. It identifies your specific pattern gaps — not "you need tactics", but "you miss deflections and mishandle IQP positions as defender". Every puzzle and position in your training queue addresses a real gap in your pattern library. When AI explains a position, it explains it in terms of the pattern at stake — building understanding, not just move memory.
+gg-chess analyses all your games to map which themes you handle well and which you don't. It identifies your specific pattern gaps — not "you need tactics", but "you miss deflections and mishandle IQP positions as defender". Every puzzle and position in your training queue addresses a real gap in your pattern library. When AI explains a position, it explains it in terms of the pattern at stake — building understanding, not just move memory.
 
 ---
 
@@ -164,8 +164,8 @@ ANTHROPIC_API_KEY=sk-ant-...
 **Import your games and analyse them:**
 
 ```bash
-uv run patzer import <username> --source lichess --max-games 50
-uv run patzer import <username> --source chesscom --max-games 50
+uv run gg-chess import <username> --source lichess --max-games 50
+uv run gg-chess import <username> --source chesscom --max-games 50
 ```
 
 This fetches your games, runs Stockfish analysis, detects tactical and strategic themes, and builds your player model.
@@ -175,13 +175,13 @@ This fetches your games, runs Stockfish analysis, detects tactical and strategic
 Download the CSV from https://database.lichess.org/#puzzles, place it in `data/`, then:
 
 ```bash
-uv run patzer import-puzzles ./data/lichess_db_puzzle.csv
+uv run gg-chess import-puzzles ./data/lichess_db_puzzle.csv
 ```
 
 **Check your theme performance:**
 
 ```bash
-uv run patzer status --username <username>
+uv run gg-chess status --username <username>
 ```
 
 Prints a table of all tracked themes with attempt count, accuracy, game error count, and next spaced repetition due date.
@@ -189,7 +189,7 @@ Prints a table of all tracked themes with attempt count, accuracy, game error co
 **Run a training session:**
 
 ```bash
-uv run patzer train --username <username> --count 10
+uv run gg-chess train --username <username> --count 10
 ```
 
 Shows puzzles targeting your weakest themes. Enter moves in UCI notation (e.g. `e2e4`). Results update your spaced repetition schedule.

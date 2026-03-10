@@ -5,6 +5,6 @@ __pycache__/
 .venv/
 *.egg-info/
 frontend/node_modules/
-src/patzer/web/static/dist/
+src/gg_chess/web/static/dist/
 stockfish/
 data/

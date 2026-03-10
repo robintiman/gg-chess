@@ -1,6 +1,6 @@
 import pytest
 
-from patzer.ingestion.parser import Game, parse_pgn
+from gg_chess.ingestion.parser import Game, parse_pgn
 
 SAMPLE_PGN_LICHESS = """[Event "Rated Blitz game"]
 [Site "https://lichess.org/abc123"]

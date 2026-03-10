@@ -1,8 +1,8 @@
 import sqlite3
 import pytest
 
-from patzer.db import init_db
-from patzer.player_model import (
+from gg_chess.db import init_db
+from gg_chess.player_model import (
     ThemePerformance,
     get_all_theme_performance,
     get_weakest_themes,

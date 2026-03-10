@@ -1,4 +1,4 @@
-from patzer.web import create_app
+from gg_chess.web import create_app
 
 app = create_app()
 

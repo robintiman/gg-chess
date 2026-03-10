@@ -4,7 +4,7 @@ import { defineConfig } from "vite";
 export default defineConfig({
   plugins: [svelte()],
   build: {
-    outDir: "../src/patzer/web/static/dist",
+    outDir: "../src/gg_chess/web/static/dist",
     emptyOutDir: true,
   },
   server: {

@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chess Concept Explorer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+         background: #1a1a2e; color: #e0e0e0; height: 100vh; display: flex;
+         flex-direction: column; overflow: hidden; }
+
+  header { background: #16213e; border-bottom: 1px solid #0f3460;
+           padding: 10px 16px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+  header h1 { font-size: 17px; color: #a9cce3; font-weight: 600; }
+  header .subtitle { font-size: 12px; color: #666; }
+
+  .main { display: grid; grid-template-columns: 230px 1fr 300px;
+          flex: 1; min-height: 0; overflow: hidden; }
+
+  /* --- Left panel: game list --- */
+  .games-col { border-right: 1px solid #0f3460; display: flex;
+               flex-direction: column; overflow: hidden; }
+  .games-col h2 { font-size: 12px; color: #888; padding: 10px 12px 6px;
+                  text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #0f3460; }
+  .game-list { overflow-y: auto; flex: 1; }
+  .game-item { padding: 10px 12px; border-bottom: 1px solid #0f3460;
+               cursor: pointer; transition: background 0.15s; }
+  .game-item:hover { background: #16213e; }
+  .game-item.active { background: #0f3460; }
+  .game-item .players { font-size: 13px; font-weight: 500; color: #c8d6e5; }
+  .game-item .meta { font-size: 11px; color: #666; margin-top: 3px; display: flex; gap: 8px; }
+  .game-item .result { font-weight: bold; }
+  .result-win { color: #2ecc71; }
+  .result-loss { color: #e74c3c; }
+  .result-draw { color: #f39c12; }
+  .concept-count { background: #0f3460; color: #a9cce3; border-radius: 10px;
+                   padding: 1px 7px; font-size: 11px; margin-top: 4px; display: inline-block; }
+
+  /* --- Center: board + move list --- */
+  .board-col { display: flex; flex-direction: column; align-items: center;
+               padding: 16px; gap: 12px; overflow: auto; }
+  .board-wrap { position: relative; }
+  .board-table { border-collapse: collapse; border: 2px solid #0f3460; }
+  .board-table td { width: 60px; height: 60px; text-align: center;
+                    font-size: 42px; line-height: 60px; cursor: default;
+                    position: relative; user-select: none; }
+  .sq-light { background: #f0d9b5; }
+  .sq-dark  { background: #b58863; }
+  .sq-highlight { outline: 4px solid rgba(255, 255, 0, 0.6); outline-offset: -4px; z-index: 1; }
+  .sq-from { background: rgba(20, 85, 30, 0.5) !important; }
+  .sq-to   { background: rgba(20, 85, 30, 0.5) !important; }
+  .coord-file { position: absolute; bottom: 2px; right: 4px;
+                font-size: 10px; color: rgba(0,0,0,0.4); font-family: monospace; }
+  .coord-rank { position: absolute; top: 2px; left: 4px;
+                font-size: 10px; color: rgba(0,0,0,0.4); font-family: monospace; }
+  .sq-light .coord-file, .sq-light .coord-rank { color: rgba(139,90,43,0.7); }
+  .sq-dark  .coord-file, .sq-dark  .coord-rank { color: rgba(240,217,181,0.7); }
+
+  .piece-w { color: #ffffff; text-shadow: 0 0 2px #000, 0 0 4px #000; }
+  .piece-b { color: #1a1a1a; text-shadow: 0 0 2px #fff, 0 0 4px rgba(255,255,255,0.6); }
+
+  .controls { display: flex; align-items: center; gap: 8px; }
+  .controls button { padding: 6px 12px; background: #16213e; border: 1px solid #0f3460;
+                     border-radius: 4px; color: #e0e0e0; cursor: pointer; font-size: 13px; }
+  .controls button:hover:not(:disabled) { background: #0f3460; }
+  .controls button:disabled { opacity: 0.3; cursor: default; }
+  .move-counter { font-size: 13px; color: #888; min-width: 60px; text-align: center; }
+
+  .move-list { display: flex; flex-wrap: wrap; gap: 2px 4px; padding: 8px;
+               font-family: monospace; font-size: 13px; max-height: 120px;
+               overflow-y: auto; background: #16213e; border-radius: 4px; width: 100%; max-width: 480px; }
+  .mn { color: #555; }
+  .mv { cursor: pointer; padding: 1px 5px; border-radius: 3px; }
+  .mv:hover { background: #0f3460; }
+  .mv.cur { background: #1a5276; font-weight: bold; }
+  .mv.has-concept { color: #f39c12; }
+
+  /* --- Right panel: concepts --- */
+  .concepts-col { border-left: 1px solid #0f3460; display: flex;
+                  flex-direction: column; overflow: hidden; }
+  .concepts-col h2 { font-size: 12px; color: #888; padding: 10px 12px 6px;
+                     text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid #0f3460; }
+  .concept-list { overflow-y: auto; flex: 1; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+  .concept-card { background: #16213e; border: 1px solid #0f3460; border-radius: 6px;
+                  padding: 10px 12px; cursor: pointer; transition: border-color 0.15s; }
+  .concept-card:hover { border-color: #1a5276; background: #1a2744; }
+  .concept-card.active { border-color: #f39c12; background: #1f2a10; }
+  .concept-name { font-size: 13px; font-weight: 600; color: #a9cce3; }
+  .concept-move { font-size: 11px; color: #f39c12; font-family: monospace; margin-top: 2px; }
+  .concept-explanation { font-size: 12px; color: #aaa; margin-top: 6px; line-height: 1.5; }
+  .no-game { color: #555; font-size: 13px; padding: 16px 12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Chess Concept Explorer</h1>
+  <span class="subtitle">jumpyfile · last 2 games</span>
+</header>
+<div class="main">
+  <div class="games-col">
+    <h2>Games</h2>
+    <div class="game-list" id="gameList"></div>
+  </div>
+  <div class="board-col">
+    <div class="board-wrap">
+      <table class="board-table" id="board"></table>
+    </div>
+    <div class="controls">
+      <button id="btnStart" onclick="goTo(0)">|&lt;</button>
+      <button id="btnPrev"  onclick="navigate(-1)">&lt;</button>
+      <span class="move-counter" id="moveCounter">0 / 0</span>
+      <button id="btnNext"  onclick="navigate(1)">&gt;</button>
+      <button id="btnEnd"   onclick="goTo(state.history.length - 1)">&gt;|</button>
+    </div>
+    <div class="move-list" id="moveList"></div>
+  </div>
+  <div class="concepts-col">
+    <h2>Concepts</h2>
+    <div class="concept-list" id="conceptList">
+      <p class="no-game">Select a game to see identified concepts.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+const GAMES = [{"white": "JumpyFile", "black": "H2H-99", "result": "1-0", "date": "2026.03.02", "time_control": "600", "history": [{"fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", "san": null, "ply": 0}, {"fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1", "san": "e4", "ply": 1}, {"fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2", "san": "e5", "ply": 2}, {"fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2", "san": "Nf3", "ply": 3}, {"fen": "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3", "san": "Nc6", "ply": 4}, {"fen": "r1bqkbnr/pppp1ppp/2n5/4p3/3PP3/5N2/PPP2PPP/RNBQKB1R b KQkq - 0 3", "san": "d4", "ply": 5}, {"fen": "r1bqkbnr/pppp1ppp/2n5/8/3pP3/5N2/PPP2PPP/RNBQKB1R w KQkq - 0 4", "san": "exd4", "ply": 6}, {"fen": "r1bqkbnr/pppp1ppp/2n5/8/3NP3/8/PPP2PPP/RNBQKB1R b KQkq - 0 4", "san": "Nxd4", "ply": 7}, {"fen": "r1bqk1nr/pppp1ppp/2n5/2b5/3NP3/8/PPP2PPP/RNBQKB1R w KQkq - 1 5", "san": "Bc5", "ply": 8}, {"fen": "r1bqk1nr/pppp1ppp/2n5/2b5/3NP3/4B3/PPP2PPP/RN1QKB1R b KQkq - 2 5", "san": "Be3", "ply": 9}, {"fen": "r1b1k1nr/pppp1ppp/2n2q2/2b5/3NP3/4B3/PPP2PPP/RN1QKB1R w KQkq - 3 6", "san": "Qf6", "ply": 10}, {"fen": "r1b1k1nr/pppp1ppp/2n2q2/2b5/3NP3/2P1B3/PP3PPP/RN1QKB1R b KQkq - 0 6", "san": "c3", "ply": 11}, {"fen": "r1b1k2r/ppppnppp/2n2q2/2b5/3NP3/2P1B3/PP3PPP/RN1QKB1R w KQkq - 1 7", "san": "Nge7", "ply": 12}, {"fen": "r1b1k2r/ppppnppp/2n2q2/2b5/3NP3/2P1B3/PP2BPPP/RN1QK2R b KQkq - 2 7", "san": "Be2", "ply": 13}, {"fen": "r1b2rk1/ppppnppp/2n2q2/2b5/3NP3/2P1B3/PP2BPPP/RN1QK2R w KQ - 3 8", "san": "O-O", "ply": 14}, {"fen": "r1b2rk1/ppppnppp/2n2q2/2b5/3NP3/2P1B3/PP2BPPP/RN1Q1RK1 b - - 4 8", "san": "O-O", "ply": 15}, {"fen": "r1b2rk1/ppppnppp/1bn2q2/8/3NP3/2P1B3/PP2BPPP/RN1Q1RK1 w - - 5 9", "san": "Bb6", "ply": 16}, {"fen": "r1b2rk1/ppppnppp/1bn2q2/8/3NP3/N1P1B3/PP2BPPP/R2Q1RK1 b - - 6 9", "san": "Na3", "ply": 17}, {"fen": "r1b2rk1/ppp1nppp/1bn2q2/3p4/3NP3/N1P1B3/PP2BPPP/R2Q1RK1 w - - 0 10", "san": "d5", "ply": 18}, {"fen": "r1b2rk1/ppp1nppp/1bn2q2/3P4/3N4/N1P1B3/PP2BPPP/R2Q1RK1 b - - 0 10", "san": "exd5", "ply": 19}, {"fen": "r1b2rk1/ppp2ppp/1bn2q2/3n4/3N4/N1P1B3/PP2BPPP/R2Q1RK1 w - - 0 11", "san": "Nxd5", "ply": 20}, {"fen": "r1b2rk1/ppp2ppp/1bN2q2/3n4/8/N1P1B3/PP2BPPP/R2Q1RK1 b - - 0 11", "san": "Nxc6", "ply": 21}, {"fen": "r1b2rk1/ppp2ppp/1bq5/3n4/8/N1P1B3/PP2BPPP/R2Q1RK1 w - - 0 12", "san": "Qxc6", "ply": 22}, {"fen": "r1b2rk1/ppp2ppp/1Bq5/3n4/8/N1P5/PP2BPPP/R2Q1RK1 b - - 0 12", "san": "Bxb6", "ply": 23}, {"fen": "r1b2rk1/1pp2ppp/1pq5/3n4/8/N1P5/PP2BPPP/R2Q1RK1 w - - 0 13", "san": "axb6", "ply": 24}, {"fen": "r1b2rk1/1pp2ppp/1pq5/3n4/8/2P5/PPN1BPPP/R2Q1RK1 b - - 1 13", "san": "Nc2", "ply": 25}, {"fen": "r4rk1/1pp2ppp/1pq5/3n1b2/8/2P5/PPN1BPPP/R2Q1RK1 w - - 2 14", "san": "Bf5", "ply": 26}, {"fen": "r4rk1/1pp2ppp/1pq5/3n1b2/3N4/2P5/PP2BPPP/R2Q1RK1 b - - 3 14", "san": "Nd4", "ply": 27}, {"fen": "r4rk1/1ppq1ppp/1p6/3n1b2/3N4/2P5/PP2BPPP/R2Q1RK1 w - - 4 15", "san": "Qd7", "ply": 28}, {"fen": "r4rk1/1ppq1ppp/1p6/3n1b2/3N4/2P2B2/PP3PPP/R2Q1RK1 b - - 5 15", "san": "Bf3", "ply": 29}, {"fen": "r4rk1/1ppq1ppp/1p4b1/3n4/3N4/2P2B2/PP3PPP/R2Q1RK1 w - - 6 16", "san": "Bg6", "ply": 30}, {"fen": "r4rk1/1ppq1ppp/1p4b1/3n4/3N4/2P2B2/PP3PPP/R2QR1K1 b - - 7 16", "san": "Re1", "ply": 31}, {"fen": "r3r1k1/1ppq1ppp/1p4b1/3n4/3N4/2P2B2/PP3PPP/R2QR1K1 w - - 8 17", "san": "Rfe8", "ply": 32}, {"fen": "r3r1k1/1ppq1ppp/1p4b1/3n4/3N4/1QP2B2/PP3PPP/R3R1K1 b - - 9 17", "san": "Qb3", "ply": 33}, {"fen": "r5k1/1ppqrppp/1p4b1/3n4/3N4/1QP2B2/PP3PPP/R3R1K1 w - - 10 18", "san": "Re7", "ply": 34}, {"fen": "r5k1/1ppqrppp/1p4b1/3B4/3N4/1QP5/PP3PPP/R3R1K1 b - - 0 18", "san": "Bxd5", "ply": 35}], "concepts": [{"name": "Removing the Defender", "ply": 19, "fen": "r1b2rk1/ppp1nppp/1bn2q2/3P4/3N4/N1P1B3/PP2BPPP/R2Q1RK1 b - - 0 10", "san": "exd5", "explanation": "By playing Nxc6 first, you exchange the knight that defends key central squares, and after bxc6 exd5 Nxd5 Nc4, you target the bishop on b6 while the pawn structure on the queenside becomes weakened with doubled c-pawns."}, {"name": "Fork", "ply": 25, "fen": "r1b2rk1/1pp2ppp/1pq5/3n4/8/2P5/PPN1BPPP/R2Q1RK1 b - - 1 13", "san": "Nc2", "explanation": "After Bf3, the bishop attacks the knight on d5 which is pinned to defending c3. Following Nxc3 bxc3 Qxc3, White's Nc2 sets up Ne3 hitting multiple targets. The key idea is that Bf3 pressures the knight on d5, and after it moves to capture on c3, White recaptures and develops initiative with Nc2-e3."}, {"name": "Pin", "ply": 25, "fen": "r1b2rk1/1pp2ppp/1pq5/3n4/8/2P5/PPN1BPPP/R2Q1RK1 b - - 1 13", "san": "Nc2", "explanation": "By playing Bf3, you pin the knight on d5 against the queen on c6 along the diagonal. This forces Black into an awkward decision since the knight on d5 is a critical defensive piece and cannot easily move without losing material."}, {"name": "Combination", "ply": 35, "fen": "r5k1/1ppqrppp/1p4b1/3B4/3N4/1QP5/PP3PPP/R3R1K1 b - - 0 18", "san": "Bxd5", "explanation": "The best line starts with Qxd5, capturing the centralized knight and creating a powerful queen position. After Rae8 Rxe7 Qxe7, you win the exchange and follow up with h4, gaining a decisive material and positional advantage by threatening to push further on the kingside."}, {"name": "Removing the Defender", "ply": 35, "fen": "r5k1/1ppqrppp/1p4b1/3B4/3N4/1QP5/PP3PPP/R3R1K1 b - - 0 18", "san": "Bxd5", "explanation": "By playing Qxd5 instead of Bxd5, you capture the knight that was a key defensive piece. After Rae8 Rxe7 Qxe7, you win the exchange on e7 since Black's rook was the main defender of the seventh rank, leaving Black's position collapsing."}]}, {"white": "pedroaradaza", "black": "JumpyFile", "result": "1-0", "date": "2026.03.02", "time_control": "600", "history": [{"fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", "san": null, "ply": 0}, {"fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1", "san": "e4", "ply": 1}, {"fen": "rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2", "san": "c5", "ply": 2}, {"fen": "rnbqkbnr/pp1ppppp/8/2p5/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2", "san": "Nf3", "ply": 3}, {"fen": "rnbqkbnr/pp2pppp/3p4/2p5/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 0 3", "san": "d6", "ply": 4}, {"fen": "rnbqkbnr/pp2pppp/3p4/2p5/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 1 3", "san": "Bc4", "ply": 5}, {"fen": "rnbqkb1r/pp2pppp/3p1n2/2p5/2B1P3/5N2/PPPP1PPP/RNBQK2R w KQkq - 2 4", "san": "Nf6", "ply": 6}, {"fen": "rnbqkb1r/pp2pppp/3p1n2/2p5/2B1P3/2N2N2/PPPP1PPP/R1BQK2R b KQkq - 3 4", "san": "Nc3", "ply": 7}, {"fen": "rnbqkb1r/pp2pp1p/3p1np1/2p5/2B1P3/2N2N2/PPPP1PPP/R1BQK2R w KQkq - 0 5", "san": "g6", "ply": 8}, {"fen": "rnbqkb1r/pp2pp1p/3p1np1/2p5/2BPP3/2N2N2/PPP2PPP/R1BQK2R b KQkq - 0 5", "san": "d4", "ply": 9}, {"fen": "rnbqkb1r/pp2pp1p/3p1np1/8/2BpP3/2N2N2/PPP2PPP/R1BQK2R w KQkq - 0 6", "san": "cxd4", "ply": 10}, {"fen": "rnbqkb1r/pp2pp1p/3p1np1/8/2BQP3/2N2N2/PPP2PPP/R1B1K2R b KQkq - 0 6", "san": "Qxd4", "ply": 11}, {"fen": "rnbqk2r/pp2ppbp/3p1np1/8/2BQP3/2N2N2/PPP2PPP/R1B1K2R w KQkq - 1 7", "san": "Bg7", "ply": 12}, {"fen": "rnbqk2r/pp2ppbp/3p1np1/8/2BQP3/2N1BN2/PPP2PPP/R3K2R b KQkq - 2 7", "san": "Be3", "ply": 13}, {"fen": "r1bqk2r/pp2ppbp/2np1np1/8/2BQP3/2N1BN2/PPP2PPP/R3K2R w KQkq - 3 8", "san": "Nc6", "ply": 14}, {"fen": "r1bqk2r/pp2ppbp/2np1np1/8/2B1P3/2N1BN2/PPPQ1PPP/R3K2R b KQkq - 4 8", "san": "Qd2", "ply": 15}, {"fen": "r1bq1rk1/pp2ppbp/2np1np1/8/2B1P3/2N1BN2/PPPQ1PPP/R3K2R w KQ - 5 9", "san": "O-O", "ply": 16}, {"fen": "r1bq1rk1/pp2ppbp/2np1np1/8/2B1P3/2N1BN2/PPPQ1PPP/2KR3R b - - 6 9", "san": "O-O-O", "ply": 17}, {"fen": "r1bqr1k1/pp2ppbp/2np1np1/8/2B1P3/2N1BN2/PPPQ1PPP/2KR3R w - - 7 10", "san": "Re8", "ply": 18}, {"fen": "r1bqr1k1/pp2ppbp/2np1np1/8/2B1P3/2N1BN1P/PPPQ1PP1/2KR3R b - - 0 10", "san": "h3", "ply": 19}, {"fen": "r1bqr1k1/pp2ppbp/3p1np1/n7/2B1P3/2N1BN1P/PPPQ1PP1/2KR3R w - - 1 11", "san": "Na5", "ply": 20}, {"fen": "r1bqr1k1/pp2ppbp/3p1np1/nB6/4P3/2N1BN1P/PPPQ1PP1/2KR3R b - - 2 11", "san": "Bb5", "ply": 21}, {"fen": "r2qr1k1/pp1bppbp/3p1np1/nB6/4P3/2N1BN1P/PPPQ1PP1/2KR3R w - - 3 12", "san": "Bd7", "ply": 22}, {"fen": "r2qr1k1/pp1bppbp/3p1np1/nB6/4P3/2N1BN1P/PPP1QPP1/2KR3R b - - 4 12", "san": "Qe2", "ply": 23}, {"fen": "r2qr1k1/pp2ppbp/3p1np1/nb6/4P3/2N1BN1P/PPP1QPP1/2KR3R w - - 0 13", "san": "Bxb5", "ply": 24}, {"fen": "r2qr1k1/pp2ppbp/3p1np1/nQ6/4P3/2N1BN1P/PPP2PP1/2KR3R b - - 0 13", "san": "Qxb5", "ply": 25}, {"fen": "2rqr1k1/pp2ppbp/3p1np1/nQ6/4P3/2N1BN1P/PPP2PP1/2KR3R w - - 1 14", "san": "Rc8", "ply": 26}, {"fen": "2rqr1k1/pp2ppbp/3p1np1/nQ2P3/8/2N1BN1P/PPP2PP1/2KR3R b - - 0 14", "san": "e5", "ply": 27}, {"fen": "2rqr1k1/1p2ppbp/p2p1np1/nQ2P3/8/2N1BN1P/PPP2PP1/2KR3R w - - 0 15", "san": "a6", "ply": 28}, {"fen": "2rqr1k1/1p2ppbp/pQ1p1np1/n3P3/8/2N1BN1P/PPP2PP1/2KR3R b - - 1 15", "san": "Qb6", "ply": 29}, {"fen": "2rqr1k1/1p1nppbp/pQ1p2p1/n3P3/8/2N1BN1P/PPP2PP1/2KR3R w - - 2 16", "san": "Nd7", "ply": 30}, {"fen": "2rQr1k1/1p1nppbp/p2p2p1/n3P3/8/2N1BN1P/PPP2PP1/2KR3R b - - 0 16", "san": "Qxd8", "ply": 31}, {"fen": "2rr2k1/1p1nppbp/p2p2p1/n3P3/8/2N1BN1P/PPP2PP1/2KR3R w - - 0 17", "san": "Rexd8", "ply": 32}, {"fen": "2rr2k1/1p1nppbp/p2P2p1/n7/8/2N1BN1P/PPP2PP1/2KR3R b - - 0 17", "san": "exd6", "ply": 33}, {"fen": "2rr2k1/1p1n1pbp/p2p2p1/n7/8/2N1BN1P/PPP2PP1/2KR3R w - - 0 18", "san": "exd6", "ply": 34}, {"fen": "2rr2k1/1p1n1pbp/p2R2p1/n7/8/2N1BN1P/PPP2PP1/2K4R b - - 0 18", "san": "Rxd6", "ply": 35}, {"fen": "2rr2k1/1p1n1p1p/p2R2p1/n7/8/2b1BN1P/PPP2PP1/2K4R w - - 0 19", "san": "Bxc3", "ply": 36}, {"fen": "2rr2k1/1p1n1p1p/p2R2p1/n7/8/2P1BN1P/P1P2PP1/2K4R b - - 0 19", "san": "bxc3", "ply": 37}, {"fen": "3r2k1/1p1n1p1p/p2R2p1/n7/8/2r1BN1P/P1P2PP1/2K4R w - - 0 20", "san": "Rxc3", "ply": 38}, {"fen": "3r2k1/1p1n1p1p/p2R2p1/n7/8/2r2N1P/P1PB1PP1/2K4R b - - 1 20", "san": "Bd2", "ply": 39}, {"fen": "3r2k1/1p1n1p1p/p1rR2p1/n7/8/5N1P/P1PB1PP1/2K4R w - - 2 21", "san": "Rc6", "ply": 40}, {"fen": "3r2k1/1p1n1p1p/p1rR2p1/B7/8/5N1P/P1P2PP1/2K4R b - - 0 21", "san": "Bxa5", "ply": 41}, {"fen": "3r2k1/1p1n1p1p/p2r2p1/B7/8/5N1P/P1P2PP1/2K4R w - - 0 22", "san": "Rxd6", "ply": 42}, {"fen": "3B2k1/1p1n1p1p/p2r2p1/8/8/5N1P/P1P2PP1/2K4R b - - 0 22", "san": "Bxd8", "ply": 43}, {"fen": "3B2k1/1p3p1p/p2r2p1/2n5/8/5N1P/P1P2PP1/2K4R w - - 1 23", "san": "Nc5", "ply": 44}, {"fen": "6k1/1p2Bp1p/p2r2p1/2n5/8/5N1P/P1P2PP1/2K4R b - - 2 23", "san": "Be7", "ply": 45}, {"fen": "6k1/1p2Bp1p/p1r3p1/2n5/8/5N1P/P1P2PP1/2K4R w - - 3 24", "san": "Rc6", "ply": 46}, {"fen": "6k1/1p3p1p/p1r3p1/2B5/8/5N1P/P1P2PP1/2K4R b - - 0 24", "san": "Bxc5", "ply": 47}, {"fen": "6k1/1p3p1p/p5p1/2r5/8/5N1P/P1P2PP1/2K4R w - - 0 25", "san": "Rxc5", "ply": 48}, {"fen": "6k1/1p3p1p/p5p1/2r5/8/5N1P/P1P2PP1/2KR4 b - - 1 25", "san": "Rd1", "ply": 49}, {"fen": "8/1p3pkp/p5p1/2r5/8/5N1P/P1P2PP1/2KR4 w - - 2 26", "san": "Kg7", "ply": 50}, {"fen": "8/1p1R1pkp/p5p1/2r5/8/5N1P/P1P2PP1/2K5 b - - 3 26", "san": "Rd7", "ply": 51}, {"fen": "8/3R1pkp/p5p1/1pr5/8/5N1P/P1P2PP1/2K5 w - - 0 27", "san": "b5", "ply": 52}, {"fen": "8/R4pkp/p5p1/1pr5/8/5N1P/P1P2PP1/2K5 b - - 1 27", "san": "Ra7", "ply": 53}, {"fen": "8/R4pkp/p1r3p1/1p6/8/5N1P/P1P2PP1/2K5 w - - 2 28", "san": "Rc6", "ply": 54}, {"fen": "8/R4pkp/p1r3p1/1p2N3/8/7P/P1P2PP1/2K5 b - - 3 28", "san": "Ne5", "ply": 55}, {"fen": "8/R4pkp/p3r1p1/1p2N3/8/7P/P1P2PP1/2K5 w - - 4 29", "san": "Re6", "ply": 56}, {"fen": "8/R4pkp/p3r1p1/1p2N3/5P2/7P/P1P3P1/2K5 b - - 0 29", "san": "f4", "ply": 57}, {"fen": "8/R4pkp/p3r3/1p2N1p1/5P2/7P/P1P3P1/2K5 w - - 0 30", "san": "g5", "ply": 58}, {"fen": "8/R4pkp/p3r3/1p2N1p1/5P2/6PP/P1P5/2K5 b - - 0 30", "san": "g3", "ply": 59}, {"fen": "8/R4pk1/p3r3/1p2N1pp/5P2/6PP/P1P5/2K5 w - - 0 31", "san": "h5", "ply": 60}, {"fen": "8/5Rk1/p3r3/1p2N1pp/5P2/6PP/P1P5/2K5 b - - 0 31", "san": "Rxf7+", "ply": 61}], "concepts": []}];
+
+const PIECES = {
+  K: '♔', Q: '♕', R: '♖', B: '♗', N: '♘', P: '♙',
+  k: '♚', q: '♛', r: '♜', b: '♝', n: '♞', p: '♟',
+};
+
+const FILES = 'abcdefgh';
+
+const state = {
+  gameIdx: -1,
+  history: [],
+  currentPly: 0,
+  conceptPly: -1,
+};
+
+function fenToBoard(fen) {
+  const rows = fen.split(' ')[0].split('/');
+  const grid = [];
+  for (const row of rows) {
+    const r = [];
+    for (const ch of row) {
+      if (/\d/.test(ch)) r.push(...Array(+ch).fill(null));
+      else r.push(ch);
+    }
+    grid.push(r);
+  }
+  return grid;
+}
+
+function renderBoard(fen, fromSq, toSq) {
+  const grid = fenToBoard(fen);
+  const table = document.getElementById('board');
+  let html = '';
+  for (let rank = 7; rank >= 0; rank--) {
+    html += '<tr>';
+    for (let file = 0; file < 8; file++) {
+      const sq = FILES[file] + (rank + 1);
+      const isLight = (rank + file) % 2 === 1;
+      const piece = grid[7 - rank][file];
+      let cls = isLight ? 'sq-light' : 'sq-dark';
+      if (sq === fromSq) cls += ' sq-from';
+      else if (sq === toSq) cls += ' sq-to';
+      const pieceHtml = piece
+        ? `<span class="${piece === piece.toUpperCase() ? 'piece-w' : 'piece-b'}">${PIECES[piece] || ''}</span>`
+        : '';
+      const fileCoord = rank === 0 ? `<span class="coord-file">${FILES[file]}</span>` : '';
+      const rankCoord = file === 0 ? `<span class="coord-rank">${rank + 1}</span>` : '';
+      html += `<td class="${cls}">${pieceHtml}${fileCoord}${rankCoord}</td>`;
+    }
+    html += '</tr>';
+  }
+  table.innerHTML = html;
+}
+
+function uciSquares(uci) {
+  if (!uci || uci.length < 4) return [null, null];
+  return [uci.slice(0, 2), uci.slice(2, 4)];
+}
+
+function goTo(ply) {
+  if (!state.history.length) return;
+  ply = Math.max(0, Math.min(ply, state.history.length - 1));
+  state.currentPly = ply;
+
+  const entry = state.history[ply];
+  const prev = ply > 0 ? state.history[ply - 1] : null;
+
+  // Compute move squares from FEN diff
+  const [from, to] = computeMovedSquares(prev?.fen, entry.fen);
+  renderBoard(entry.fen, from, to);
+  renderMoveList();
+  renderControls();
+}
+
+function computeMovedSquares(fenBefore, fenAfter) {
+  if (!fenBefore) return [null, null];
+  const before = fenToBoard(fenBefore);
+  const after = fenToBoard(fenAfter);
+  let disappeared = null, appeared = null;
+  for (let rank = 0; rank < 8; rank++) {
+    for (let file = 0; file < 8; file++) {
+      const b = before[rank][file];
+      const a = after[rank][file];
+      if (b && !a) disappeared = FILES[file] + (8 - rank);
+      else if (!b && a && disappeared) appeared = FILES[file] + (8 - rank);
+    }
+  }
+  return [disappeared, appeared];
+}
+
+function navigate(delta) {
+  goTo(state.currentPly + delta);
+}
+
+function renderControls() {
+  const total = state.history.length - 1;
+  document.getElementById('moveCounter').textContent = `${state.currentPly} / ${total}`;
+  document.getElementById('btnStart').disabled = state.currentPly === 0;
+  document.getElementById('btnPrev').disabled = state.currentPly === 0;
+  document.getElementById('btnNext').disabled = state.currentPly >= total;
+  document.getElementById('btnEnd').disabled = state.currentPly >= total;
+}
+
+function getConceptPlies() {
+  if (state.gameIdx < 0) return new Set();
+  return new Set(GAMES[state.gameIdx].concepts.map(c => c.ply));
+}
+
+function renderMoveList() {
+  const moves = state.history.slice(1);
+  const conceptPlies = getConceptPlies();
+  let html = '';
+  for (let i = 0; i < moves.length; i += 2) {
+    const num = Math.floor(i / 2) + 1;
+    const w = moves[i];
+    const b = moves[i + 1];
+    const wPly = w.ply;
+    const bPly = b ? b.ply : -1;
+    const wCls = `mv${wPly === state.currentPly ? ' cur' : ''}${conceptPlies.has(wPly) ? ' has-concept' : ''}`;
+    const bCls = b ? `mv${bPly === state.currentPly ? ' cur' : ''}${conceptPlies.has(bPly) ? ' has-concept' : ''}` : '';
+    html += `<span class="mn">${num}.</span>`;
+    html += `<span class="${wCls}" onclick="goTo(${wPly})">${w.san}</span>`;
+    if (b) html += `<span class="${bCls}" onclick="goTo(${bPly})">${b.san}</span>`;
+  }
+  document.getElementById('moveList').innerHTML = html;
+}
+
+function renderConceptList() {
+  const el = document.getElementById('conceptList');
+  if (state.gameIdx < 0) {
+    el.innerHTML = '<p class="no-game">Select a game to see identified concepts.</p>';
+    return;
+  }
+  const concepts = GAMES[state.gameIdx].concepts;
+  if (!concepts.length) {
+    el.innerHTML = '<p class="no-game">No concepts identified in this game.</p>';
+    return;
+  }
+  let html = '';
+  for (const c of concepts) {
+    const moveNum = Math.ceil(c.ply / 2);
+    const side = c.ply % 2 === 1 ? 'White' : 'Black';
+    const active = c.ply === state.currentPly ? ' active' : '';
+    html += `
+      <div class="concept-card${active}" onclick="jumpToConcept(${c.ply})">
+        <div class="concept-name">${escHtml(c.name)}</div>
+        <div class="concept-move">Move ${moveNum} (${side}) — ${escHtml(c.san || '')}</div>
+        <div class="concept-explanation">${escHtml(c.explanation)}</div>
+      </div>`;
+  }
+  el.innerHTML = html;
+}
+
+function jumpToConcept(ply) {
+  goTo(ply);
+  renderConceptList();
+}
+
+function resultClass(result, username) {
+  if (result === '1/2-1/2') return 'result-draw';
+  const game = GAMES.find(g => g.white.toLowerCase() === username.toLowerCase() || g.black.toLowerCase() === username.toLowerCase());
+  return result === '1-0' ? 'result-win' : 'result-loss';
+}
+
+function renderGameList() {
+  const el = document.getElementById('gameList');
+  const username = 'jumpyfile'.toLowerCase();
+  let html = '';
+  GAMES.forEach((g, i) => {
+    const isActive = i === state.gameIdx;
+    let rClass = 'result-draw';
+    if (g.result === '1-0') rClass = g.white.toLowerCase() === username ? 'result-win' : 'result-loss';
+    if (g.result === '0-1') rClass = g.black.toLowerCase() === username ? 'result-win' : 'result-loss';
+    html += `
+      <div class="game-item${isActive ? ' active' : ''}" onclick="selectGame(${i})">
+        <div class="players">${escHtml(g.white)} vs ${escHtml(g.black)}</div>
+        <div class="meta">
+          <span class="result ${rClass}">${g.result}</span>
+          <span>${g.date}</span>
+          <span>${g.time_control}</span>
+        </div>
+        <span class="concept-count">${g.concepts.length} concept${g.concepts.length !== 1 ? 's' : ''}</span>
+      </div>`;
+  });
+  el.innerHTML = html;
+}
+
+function selectGame(idx) {
+  state.gameIdx = idx;
+  state.history = GAMES[idx].history;
+  state.currentPly = 0;
+  state.conceptPly = -1;
+  goTo(0);
+  renderGameList();
+  renderConceptList();
+}
+
+function escHtml(str) {
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  if (e.key === 'ArrowLeft') navigate(-1);
+  if (e.key === 'ArrowRight') navigate(1);
+});
+
+// Init
+renderBoard('rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1', null, null);
+renderGameList();
+renderControls();
+</script>
+</body>
+</html>

@@ -10,7 +10,7 @@ ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
 STOCKFISH_PATH: str = os.getenv("STOCKFISH_PATH", "stockfish")
 
 DB_PATH: Path = Path(
-    os.getenv("PATZER_DB_PATH", Path.home() / ".local" / "share" / "patzer" / "patzer.db")
+    os.getenv("GG_CHESS_DB_PATH", Path.home() / ".local" / "share" / "gg-chess" / "gg-chess.db")
 )
 
 PUZZLE_CSV_PATH: Path = Path(

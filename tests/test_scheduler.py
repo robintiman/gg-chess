@@ -1,6 +1,6 @@
 import pytest
 
-from patzer.training.scheduler import SM2State, calculate_next_review
+from gg_chess.training.scheduler import SM2State, calculate_next_review
 
 
 def make_state(interval=1, easiness=2.5, repetitions=0):

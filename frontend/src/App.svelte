@@ -137,7 +137,7 @@
 
 <div class="app">
   <header>
-    <a class="logo" href="/">patzer.review</a>
+    <a class="logo" href="/">gg-chess</a>
     <nav>
       <a href="/" class="nav-link active">Games</a>
       <a href="/" class="nav-link">Openings</a>
