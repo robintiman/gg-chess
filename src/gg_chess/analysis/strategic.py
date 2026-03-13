@@ -47,11 +47,15 @@ def _identify_concept_claude(error_pos: ErrorPosition, game: Game) -> tuple[str,
     best_move_context = _best_move_context(board, error_pos.pv_san)
     concepts_reference = CONCEPTS_FILE.read_text(encoding="utf-8") if CONCEPTS_FILE.exists() else ""
 
-    prompt = f"""You are an expert chess coach analysing a position where {game.username} ({user_side}) missed an opportunity.
+    system_content = [
+        {
+            "type": "text",
+            "text": "You are an expert chess coach. Use the following chess concepts reference when naming concepts:\n\n" + concepts_reference,
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
 
-Use the following chess concepts reference when naming concepts:
-
-{concepts_reference}
+    prompt = f"""Analyse a position where {game.username} ({user_side}) missed an opportunity.
 
 Position (move {move_num}, {user_side} to move):
 {ascii_board}
@@ -111,6 +115,7 @@ Only flag a concept if it is genuinely and clearly present — the best line sho
                 model=CLAUDE_CONCEPT_MODEL,
                 max_tokens=2048,
                 temperature=0,
+                system=system_content,
                 tools=[query_stockfish_tool, report_concept_tool],
                 tool_choice={"type": "auto"},
                 messages=messages,
