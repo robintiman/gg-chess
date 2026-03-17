@@ -175,7 +175,7 @@ def analyse_game_route(game_db_id: int):
         import sqlite3
 
         from ..analysis.engine import analyse_game
-        from ..analysis.strategic import identify_concept
+        from ..analysis.tactics import identify_tactic
         from ..ingestion.parser import parse_pgn
 
         def send(event_type, **kwargs):
@@ -220,10 +220,10 @@ def analyse_game_route(game_db_id: int):
 
             def call_concept(err):
                 try:
-                    return err, identify_concept(err, game)
+                    return err, identify_tactic(err, game)
                 except Exception as e:
                     import traceback
-                    print(f"[identify_concept] error at move {err.move_number}: {e}")
+                    print(f"[identify_tactic] error at move {err.move_number}: {e}")
                     traceback.print_exc()
                     return err, ("", "")
 
