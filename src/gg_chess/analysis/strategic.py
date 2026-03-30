@@ -43,7 +43,6 @@ def _identify_concept_claude(error_pos: ErrorPosition, game: Game) -> tuple[str,
     for i, alt_pv in enumerate(alt_pvs, start=2):
         alt_lines_text += f"  Line {i}: {' '.join(alt_pv) if alt_pv else '?'}\n"
 
-    ascii_board = _board_to_prompt(board, user_side)
     best_move_context = _best_move_context(board, error_pos.pv_san)
     concepts_reference = CONCEPTS_FILE.read_text(encoding="utf-8") if CONCEPTS_FILE.exists() else ""
 
@@ -58,7 +57,6 @@ def _identify_concept_claude(error_pos: ErrorPosition, game: Game) -> tuple[str,
     prompt = f"""Analyse a position where {game.username} ({user_side}) missed an opportunity.
 
 Position (move {move_num}, {user_side} to move):
-{ascii_board}
 {best_move_context}
   FEN: {error_pos.fen_before}
   {user_side} played: {player_san}
@@ -184,54 +182,6 @@ def _run_stockfish_query(engine, params: dict) -> dict:
             best_moves.append(pv_moves[0])
 
     return {"eval_cp": eval_cp, "best_moves": best_moves, "pv_lines": pv_lines}
-
-
-def _board_to_prompt(board: chess.Board, player_side: str) -> str:
-    """Render the board as ASCII with piece lists, oriented from the player's perspective."""
-    flip = player_side == "Black"
-
-    rows = []
-    ranks = range(7, -1, -1) if not flip else range(8)
-    for rank in ranks:
-        files = range(8) if not flip else range(7, -1, -1)
-        rank_label = str(rank + 1)
-        squares = []
-        for file in files:
-            sq = chess.square(file, rank)
-            piece = board.piece_at(sq)
-            squares.append(piece.symbol() if piece else ".")
-        rows.append(f"  {rank_label} | {' '.join(squares)}")
-
-    file_labels = "    a b c d e f g h" if not flip else "    h g f e d c b a"
-    separator = "    ----------------"
-    board_str = "\n".join(rows) + f"\n{separator}\n{file_labels}"
-
-    # Piece lists
-    def piece_list(color: chess.Color) -> str:
-        pieces = []
-        for pt in [chess.QUEEN, chess.ROOK, chess.BISHOP, chess.KNIGHT, chess.PAWN]:
-            for sq in board.pieces(pt, color):
-                sq_color = "L" if chess.BB_LIGHT_SQUARES & chess.BB_SQUARES[sq] else "D"
-                pieces.append(f"{chess.piece_symbol(pt).upper()}{chess.square_name(sq)}[{sq_color}]")
-        king_sq = board.king(color)
-        if king_sq is not None:
-            sq_color = "L" if chess.BB_LIGHT_SQUARES & chess.BB_SQUARES[king_sq] else "D"
-            pieces.insert(0, f"K{chess.square_name(king_sq)}[{sq_color}]")
-        return " ".join(pieces)
-
-    white_pieces = piece_list(chess.WHITE)
-    black_pieces = piece_list(chess.BLACK)
-
-    # Hanging / en-prise pieces
-    hanging = _hanging_pieces(board)
-    hanging_note = f"  Hanging/en-prise: {hanging}" if hanging else ""
-
-    return (
-        f"{board_str}\n"
-        f"  White: {white_pieces}\n"
-        f"  Black: {black_pieces}\n"
-        f"{hanging_note}"
-    )
 
 
 def _best_move_context(board: chess.Board, pv_san: list[str]) -> str:
