@@ -5,6 +5,7 @@
 
   export let flipped = false;
   export let blunderFlash = null; // { square: "e5", key: number }
+  export let showEngineArrows = true;
 
   let el;
   let cg;
@@ -44,17 +45,19 @@
     const turnColor = fen.split(" ")[1] === "w" ? "white" : "black";
     const shapes = [];
 
-    if (analysis?.best_move) {
-      const fd = uciToFromDest(analysis.best_move);
-      if (fd) shapes.push({ orig: fd.orig, dest: fd.dest, brush: "blue" });
-    } else if (error?.best_move) {
-      const fd = uciToFromDest(error.best_move);
-      if (fd) shapes.push({ orig: fd.orig, dest: fd.dest, brush: "blue" });
-    }
+    if (showEngineArrows) {
+      if (analysis?.best_move) {
+        const fd = uciToFromDest(analysis.best_move);
+        if (fd) shapes.push({ orig: fd.orig, dest: fd.dest, brush: "blue" });
+      } else if (error?.best_move) {
+        const fd = uciToFromDest(error.best_move);
+        if (fd) shapes.push({ orig: fd.orig, dest: fd.dest, brush: "blue" });
+      }
 
-    if (error?.player_move) {
-      const fd = uciToFromDest(error.player_move);
-      if (fd) shapes.push({ orig: fd.orig, dest: fd.dest, brush: "red" });
+      if (error?.player_move) {
+        const fd = uciToFromDest(error.player_move);
+        if (fd) shapes.push({ orig: fd.orig, dest: fd.dest, brush: "red" });
+      }
     }
 
     cg.set({

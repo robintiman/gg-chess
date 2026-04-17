@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS games (
     played_at TIMESTAMP,
     pgn_text TEXT NOT NULL,
     analysed INTEGER DEFAULT 0,
+    interest_score REAL,
     UNIQUE(game_id, source)
 );
 
@@ -41,40 +42,25 @@ CREATE TABLE IF NOT EXISTS positions (
     concept_explanation TEXT NOT NULL DEFAULT ''
 );
 
-CREATE TABLE IF NOT EXISTS player_themes (
+CREATE TABLE IF NOT EXISTS game_reviews (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    player_id INTEGER NOT NULL REFERENCES players(id),
-    theme_name TEXT NOT NULL,
-    attempts INTEGER NOT NULL DEFAULT 0,
-    correct INTEGER NOT NULL DEFAULT 0,
-    game_errors INTEGER NOT NULL DEFAULT 0,
-    last_seen TIMESTAMP,
-    sr_interval INTEGER NOT NULL DEFAULT 1,
-    sr_easiness REAL NOT NULL DEFAULT 2.5,
-    sr_repetitions INTEGER NOT NULL DEFAULT 0,
-    sr_due_date DATE,
-    UNIQUE(player_id, theme_name)
+    game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    phase TEXT NOT NULL DEFAULT 'self_analysis',
+    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMP,
+    UNIQUE(game_id)
 );
 
-CREATE TABLE IF NOT EXISTS puzzles (
-    puzzle_id TEXT PRIMARY KEY,
-    fen TEXT NOT NULL,
-    moves TEXT NOT NULL,
-    rating INTEGER NOT NULL,
-    themes TEXT NOT NULL DEFAULT '',
-    game_url TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_puzzles_rating ON puzzles(rating);
-CREATE INDEX IF NOT EXISTS idx_puzzles_themes ON puzzles(themes);
-
-CREATE TABLE IF NOT EXISTS training_log (
+CREATE TABLE IF NOT EXISTS move_annotations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    player_id INTEGER NOT NULL REFERENCES players(id),
-    puzzle_id TEXT NOT NULL REFERENCES puzzles(puzzle_id),
-    theme_name TEXT NOT NULL,
-    correct INTEGER NOT NULL,
-    quality INTEGER NOT NULL,
-    attempted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+    move_number INTEGER NOT NULL,
+    fen_before TEXT NOT NULL,
+    user_thought TEXT NOT NULL DEFAULT '',
+    error_classification TEXT NOT NULL DEFAULT '',
+    error_type TEXT NOT NULL DEFAULT '',
+    annotated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(game_id, move_number)
 );
 """
 
@@ -92,3 +78,45 @@ def init_db(db_path: Path = DB_PATH) -> sqlite3.Connection:
     conn = get_db(db_path)
     conn.executescript(DDL)
     return conn
+
+
+def migrate_v2(conn: sqlite3.Connection) -> None:
+    """One-time migration from v1 schema: drops unused tables, adds new ones."""
+    tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "game_reviews" in tables:
+        return  # already migrated
+
+    conn.executescript("""
+        DROP TABLE IF EXISTS training_log;
+        DROP TABLE IF EXISTS player_themes;
+        DROP TABLE IF EXISTS puzzles;
+    """)
+
+    # Add interest_score to games if it doesn't exist yet
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(games)")}
+    if "interest_score" not in cols:
+        conn.execute("ALTER TABLE games ADD COLUMN interest_score REAL")
+
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS game_reviews (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+            phase TEXT NOT NULL DEFAULT 'self_analysis',
+            started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            completed_at TIMESTAMP,
+            UNIQUE(game_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS move_annotations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
+            move_number INTEGER NOT NULL,
+            fen_before TEXT NOT NULL,
+            user_thought TEXT NOT NULL DEFAULT '',
+            error_classification TEXT NOT NULL DEFAULT '',
+            error_type TEXT NOT NULL DEFAULT '',
+            annotated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(game_id, move_number)
+        );
+    """)
+    conn.commit()

@@ -1,114 +1,16 @@
 <script>
   import { onMount, onDestroy } from "svelte";
-  import GameList from "./lib/GameList.svelte";
-  import Board from "./lib/Board.svelte";
-  import MoveList from "./lib/MoveList.svelte";
-  import EvalBar from "./lib/EvalBar.svelte";
-  import ErrorPanel from "./lib/ErrorPanel.svelte";
-  import Chat from "./lib/Chat.svelte";
-  import { history, currentIndex, currentGame, currentAnalysis } from "./stores.js";
-  import { get } from "svelte/store";
+  import HomeView from "./lib/HomeView.svelte";
+  import ReviewView from "./lib/ReviewView.svelte";
+  import ComparisonView from "./lib/ComparisonView.svelte";
+  import { appView, username, currentIndex, history, currentAnalysis } from "./stores.js";
 
-  let activeTab = "errors";
-  let flipped = false;
-  let analysing = false;
-  let analyseStatus = "";
-  let analyseProgress = 0;
-  // Blunder flash: passed to Board for animated highlight
-  let blunderFlash = null; // { square: "e5", key: number }
-  let blunderFlashKey = 0;
-  // Concept toast shown during concept identification phase
-  let conceptToast = null; // { move_number, concept_name, player_move }
-  let conceptToastTimer = null;
+  let usernameInput = "";
 
-  function showConceptToast(data) {
-    clearTimeout(conceptToastTimer);
-    conceptToast = data;
-    conceptToastTimer = setTimeout(() => { conceptToast = null; }, 3000);
-  }
-
-  async function analyseGame() {
-    if (!$currentGame || analysing) return;
-    analysing = true;
-    analyseProgress = 5;
-    analyseStatus = "Preparing position…";
-    blunderFlash = null;
-    conceptToast = null;
-    try {
-      const res = await fetch(`/api/analyse-game/${$currentGame.id}`, { method: "POST" });
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const chunks = buffer.split("\n\n");
-        buffer = chunks.pop();
-        for (const chunk of chunks) {
-          const match = chunk.match(/^data: (.+)$/m);
-          if (!match) continue;
-          const event = JSON.parse(match[1]);
-
-          if (event.type === "analyzing_move") {
-            // Advance board to position before this move (fen_before = half_move_index - 1)
-            currentIndex.set(Math.max(0, event.half_move_index - 1));
-            analyseStatus = `Analysing ${event.san}…`;
-            if (analyseProgress < 60) analyseProgress = Math.min(60, analyseProgress + 1);
-          }
-
-          if (event.type === "status") {
-            analyseStatus = event.message;
-            if (event.message.toLowerCase().includes("stockfish")) {
-              analyseProgress = 20;
-            } else if (event.message.toLowerCase().includes("concepts")) {
-              analyseProgress = 62;
-            }
-          }
-
-          if (event.type === "concept_identified") {
-            // Navigate to the blunder position
-            const idx = Math.max(0, event.half_move_index - 1);
-            currentIndex.set(idx);
-            // Flash the origin square of the bad move
-            const originSquare = event.player_move?.slice(0, 2) ?? null;
-            blunderFlash = originSquare ? { square: originSquare, key: ++blunderFlashKey } : null;
-            // Show concept toast
-            if (event.concept_name) {
-              showConceptToast({
-                move_number: event.move_number,
-                concept_name: event.concept_name,
-                player_move: event.player_move,
-              });
-            }
-            analyseStatus = `Move ${event.move_number}: ${event.concept_name || "mistake found"}`;
-            if (analyseProgress < 95) analyseProgress = Math.min(95, analyseProgress + 3);
-          }
-
-          if (event.type === "error") analyseStatus = `Error: ${event.message}`;
-          if (event.type === "done") {
-            analyseProgress = 100;
-            analyseStatus = "Analysis complete";
-            blunderFlash = null;
-            conceptToast = null;
-            // Refresh current game to get errors
-            const r = await fetch(`/api/game/${$currentGame.id}`);
-            if (r.ok) {
-              const data = await r.json();
-              currentGame.update(g => ({ ...g, ...data, analysed: 1 }));
-            }
-            await new Promise(r => setTimeout(r, 800));
-            analyseStatus = "";
-            analyseProgress = 0;
-          }
-        }
-      }
-    } catch (e) {
-      analyseStatus = `Error: ${e.message}`;
-    } finally {
-      analysing = false;
-      blunderFlash = null;
-    }
+  function submitUsername() {
+    const trimmed = usernameInput.trim();
+    if (!trimmed) return;
+    username.set(trimmed);
   }
 
   function navigate(delta) {
@@ -129,103 +31,48 @@
 
   onMount(() => window.addEventListener("keydown", onKey));
   onDestroy(() => window.removeEventListener("keydown", onKey));
-
-  $: canPrev = $currentIndex > 0;
-  $: canNext = $currentIndex < $history.length - 1;
-  $: errorCount = $currentGame?.errors?.length ?? 0;
 </script>
 
 <div class="app">
   <header>
-    <a class="logo" href="/">gg-chess</a>
+    <a class="logo" href="/" on:click|preventDefault={() => appView.set("home")}>gg-chess</a>
     <nav>
-      <a href="/" class="nav-link active">Games</a>
-      <a href="/" class="nav-link">Openings</a>
-      <span class="nav-sep"></span>
-      <a href="/" class="nav-link">Settings</a>
+      {#if $appView !== "home"}
+        <button class="nav-back" on:click={() => appView.set("home")}>← Games</button>
+      {/if}
+      {#if $username}
+        <span class="nav-user">{$username}</span>
+        <button class="nav-link" on:click={() => username.set("")}>Switch</button>
+      {/if}
     </nav>
   </header>
-  <main>
-    <aside class="games-col">
-      <GameList />
-    </aside>
 
-    <section class="board-col">
-      <div class="board-row">
-        <EvalBar />
-        <div class="board-center">
-          <Board {flipped} {blunderFlash} />
-        </div>
+  {#if !$username}
+    <div class="username-gate">
+      <div class="gate-card">
+        <div class="gate-icon">♟</div>
+        <h1>gg-chess</h1>
+        <p>Enter your Chess.com username to start reviewing your games.</p>
+        <form on:submit|preventDefault={submitUsername}>
+          <input
+            bind:value={usernameInput}
+            placeholder="Chess.com username"
+            autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            spellcheck="false"
+          />
+          <button type="submit" disabled={!usernameInput.trim()}>Start reviewing →</button>
+        </form>
       </div>
-      <div class="controls">
-        <button on:click={() => { currentIndex.set(0); currentAnalysis.set(null); }} disabled={!canPrev} title="First move">⏮</button>
-        <button on:click={() => navigate(-1)} disabled={!canPrev} title="Previous move">⏪</button>
-        <span class="move-counter">{$currentIndex}/{$history.length > 0 ? $history.length - 1 : 0}</span>
-        <button on:click={() => navigate(1)} disabled={!canNext} title="Next move">⏩</button>
-        <button on:click={() => { currentIndex.set($history.length - 1); currentAnalysis.set(null); }} disabled={!canNext} title="Last move">⏭</button>
-        <button on:click={() => (flipped = !flipped)} class="flip-btn" title="Flip board">⇅</button>
-      </div>
-      {#if $currentGame}
-        <div class="analyse-section">
-          {#if analysing}
-            <div class="analyse-progress">
-              <div class="progress-header">
-                <span class="progress-piece">♞</span>
-                <span class="progress-status">{analyseStatus || "Analysing…"}</span>
-              </div>
-              <div class="chess-bar">
-                {#each Array(8) as _, i}
-                  {@const threshold = (i + 1) * 12.5}
-                  {@const filled = analyseProgress >= threshold}
-                  {@const active = analyseProgress >= i * 12.5 && !filled}
-                  <div class="chess-sq {i % 2 === 0 ? 'sq-light' : 'sq-dark'}"
-                       class:filled
-                       class:active></div>
-                {/each}
-              </div>
-              {#if conceptToast}
-                {#key conceptToast.move_number + conceptToast.concept_name}
-                  <div class="concept-toast">
-                    <span class="toast-glyph">??</span>
-                    <span class="toast-move">Move {conceptToast.move_number}</span>
-                    <span class="toast-concept">{conceptToast.concept_name}</span>
-                  </div>
-                {/key}
-              {/if}
-            </div>
-          {:else}
-            <button on:click={analyseGame} class="analyse-btn" title="Analyse game with Stockfish + Claude">
-              <span class="btn-piece">♞</span>
-              <span>Analyse game</span>
-            </button>
-          {/if}
-        </div>
-      {/if}
-      {#if $currentGame}
-        <MoveList />
-      {/if}
-    </section>
-
-    <aside class="analysis-col">
-      <div class="tab-bar">
-        <button class="tab-btn" class:active={activeTab === "errors"} on:click={() => (activeTab = "errors")}>
-          Errors
-          {#if errorCount > 0}
-            <span class="badge">{errorCount}</span>
-          {/if}
-        </button>
-        <button class="tab-btn" class:active={activeTab === "chat"} on:click={() => (activeTab = "chat")}>
-          Chat
-        </button>
-      </div>
-      <div class="tab-content" class:hidden={activeTab !== "errors"}>
-        <ErrorPanel />
-      </div>
-      <div class="tab-content chat-tab" class:hidden={activeTab !== "chat"}>
-        <Chat />
-      </div>
-    </aside>
-  </main>
+    </div>
+  {:else if $appView === "home"}
+    <HomeView />
+  {:else if $appView === "review"}
+    <ReviewView />
+  {:else if $appView === "comparison"}
+    <ComparisonView />
+  {/if}
 </div>
 
 <style>
@@ -256,238 +103,105 @@
   nav {
     display: flex;
     align-items: center;
-    gap: 4px;
-  }
-  .nav-link {
-    padding: 6px 10px;
-    border-radius: var(--radius-sm);
-    color: var(--text-muted);
-    text-decoration: none;
-    font-size: 14px;
-    transition: color 0.15s;
-  }
-  .nav-link:hover,
-  .nav-link.active { color: var(--text); }
-  .nav-sep {
-    width: 1px;
-    height: 16px;
-    background: var(--border);
-    margin: 0 4px;
-  }
-  main {
-    display: grid;
-    grid-template-columns: 240px 1fr 380px;
-    flex: 1;
-    min-height: 0;
-    overflow: hidden;
-    height: calc(100vh - 52px);
-  }
-  .games-col {
-    border-right: 1px solid var(--border);
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-  }
-  .board-col {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 16px;
-    gap: 10px;
-    overflow: auto;
-  }
-  .board-row {
-    display: flex;
-    align-items: center;
     gap: 8px;
   }
-  .board-center { flex-shrink: 0; }
-  .controls {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  .controls button {
-    width: 36px;
-    height: 30px;
-    background: var(--surface);
+  .nav-back {
+    background: none;
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     color: var(--text-muted);
     cursor: pointer;
-    font-size: 14px;
+    font-size: 13px;
+    padding: 4px 10px;
+    font-family: var(--font-ui);
+    transition: color 0.15s, background 0.15s;
+  }
+  .nav-back:hover { color: var(--text); background: var(--surface2); }
+  .nav-link {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 13px;
+    padding: 4px 8px;
+    font-family: var(--font-ui);
+    transition: color 0.15s;
+  }
+  .nav-link:hover { color: var(--text); }
+  .nav-user {
+    font-size: 13px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+  }
+  .username-gate {
+    flex: 1;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: background 0.15s, color 0.15s;
+    background: var(--bg);
   }
-  .controls button:hover:not(:disabled) {
-    background: var(--surface2);
+  .gate-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 40px 48px;
+    text-align: center;
+    max-width: 400px;
+    width: 100%;
+  }
+  .gate-icon {
+    font-size: 48px;
+    line-height: 1;
+    margin-bottom: 16px;
+  }
+  .gate-card h1 {
+    font-family: var(--font-mono);
+    font-size: 22px;
+    font-weight: 500;
+    color: var(--accent);
+    margin: 0 0 8px;
+    letter-spacing: -0.3px;
+  }
+  .gate-card p {
+    font-size: 14px;
+    color: var(--text-muted);
+    margin: 0 0 24px;
+    line-height: 1.5;
+  }
+  .gate-card form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .gate-card input {
+    width: 100%;
+    padding: 10px 12px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
     color: var(--text);
+    font-size: 15px;
+    font-family: var(--font-mono);
+    box-sizing: border-box;
+    outline: none;
+    transition: border-color 0.15s;
   }
-  .controls button:disabled { opacity: 0.3; cursor: default; }
-  .flip-btn { margin-left: 4px; }
-  .analyse-section {
-    width: 100%;
-    max-width: 480px;
-  }
-  .analyse-btn {
-    width: 100%;
-    height: 44px;
+  .gate-card input:focus { border-color: var(--accent); }
+  .gate-card button[type="submit"] {
+    padding: 10px;
     background: var(--accent-muted);
     color: var(--accent);
     border: 1px solid var(--accent);
     border-radius: var(--radius-sm);
-    font-size: 15px;
-    font-weight: 600;
-    font-family: var(--font-ui);
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    letter-spacing: 0.3px;
-    transition: background 0.15s, color 0.15s, box-shadow 0.15s;
-  }
-  .analyse-btn:hover {
-    background: var(--accent);
-    color: #000;
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent);
-  }
-  .btn-piece {
-    font-size: 20px;
-    line-height: 1;
-  }
-  .analyse-progress {
-    width: 100%;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .progress-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .progress-piece {
-    font-size: 18px;
-    line-height: 1;
-    animation: piece-bob 1s ease-in-out infinite;
-  }
-  @keyframes piece-bob {
-    0%, 100% { transform: translateY(0); }
-    50% { transform: translateY(-3px); }
-  }
-  .progress-status {
-    font-size: 13px;
-    color: var(--text-muted);
-    font-style: italic;
-  }
-  .chess-bar {
-    display: flex;
-    height: 16px;
-    border-radius: 3px;
-    overflow: hidden;
-    border: 1px solid var(--border);
-  }
-  .chess-sq {
-    flex: 1;
-    transition: background 0.35s ease;
-  }
-  .chess-sq.sq-light { background: #2a2a2a; }
-  .chess-sq.sq-dark  { background: #222; }
-  .chess-sq.sq-light.filled { background: #81b64c; }
-  .chess-sq.sq-dark.filled  { background: #6a9e3c; }
-  .chess-sq.sq-light.active { background: #4a6e2a; animation: pulse-sq 0.8s ease-in-out infinite; }
-  .chess-sq.sq-dark.active  { background: #3d5c23; animation: pulse-sq 0.8s ease-in-out infinite; }
-  @keyframes pulse-sq {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
-  }
-  .concept-toast {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 7px 10px;
-    background: rgba(231, 76, 60, 0.12);
-    border: 1px solid rgba(231, 76, 60, 0.35);
-    border-radius: var(--radius-sm);
-    animation: toast-slide-in 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) both;
-    overflow: hidden;
-  }
-  @keyframes toast-slide-in {
-    0% { opacity: 0; transform: translateY(6px) scale(0.97); }
-    100% { opacity: 1; transform: translateY(0) scale(1); }
-  }
-  .toast-glyph {
-    font-size: 13px;
-    font-weight: 700;
-    color: #e74c3c;
-    font-family: var(--font-mono);
-    flex-shrink: 0;
-  }
-  .toast-move {
-    font-size: 12px;
-    color: var(--text-dim);
-    flex-shrink: 0;
-  }
-  .toast-concept {
-    font-size: 13px;
-    font-weight: 500;
-    color: #e07060;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-  .move-counter { font-size: 13px; color: var(--text-dim); min-width: 52px; text-align: center; }
-  .analysis-col {
-    border-left: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-  .tab-bar {
-    display: flex;
-    border-bottom: 1px solid var(--border);
-    flex-shrink: 0;
-  }
-  .tab-btn {
-    flex: 1;
-    padding: 12px 16px;
-    background: none;
-    border: none;
-    border-bottom: 2px solid transparent;
-    color: var(--text-muted);
-    cursor: pointer;
     font-size: 14px;
+    font-weight: 600;
     font-family: var(--font-ui);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    transition: color 0.15s;
-    margin-bottom: -1px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
   }
-  .tab-btn:hover { color: var(--text); }
-  .tab-btn.active {
-    color: var(--text);
-    border-bottom-color: var(--accent);
-  }
-  .badge {
+  .gate-card button[type="submit"]:hover:not(:disabled) {
     background: var(--accent);
     color: #000;
-    border-radius: 10px;
-    padding: 1px 6px;
-    font-size: 12px;
-    font-weight: 600;
   }
-  .tab-content {
-    flex: 1;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    padding: 12px;
-  }
-  .chat-tab { padding: 0; }
-  .hidden { display: none !important; }
+  .gate-card button[type="submit"]:disabled { opacity: 0.4; cursor: default; }
 </style>

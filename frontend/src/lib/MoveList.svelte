@@ -1,6 +1,8 @@
 <script>
   import { history, currentIndex, currentGame, currentAnalysis } from "../stores.js";
 
+  export let hideErrors = false;
+
   function goTo(idx) {
     currentIndex.set(idx);
     currentAnalysis.set(null);
@@ -34,16 +36,16 @@
     <span
       class="move"
       class:current={$currentIndex === pair.white.idx}
-      class:blunder={!!$currentGame?.errors_by_fen?.[pair.white.fen]}
+      class:blunder={!hideErrors && !!$currentGame?.errors_by_fen?.[pair.white.fen]}
       on:click={() => goTo(pair.white.idx)}
-    >{pair.white.san}{errorGlyph(pair.white.fen)}</span>
+    >{pair.white.san}{hideErrors ? "" : errorGlyph(pair.white.fen)}</span>
     {#if pair.black}
       <span
         class="move"
         class:current={$currentIndex === pair.black.idx}
-        class:blunder={!!$currentGame?.errors_by_fen?.[pair.black.fen]}
+        class:blunder={!hideErrors && !!$currentGame?.errors_by_fen?.[pair.black.fen]}
         on:click={() => goTo(pair.black.idx)}
-      >{pair.black.san}{errorGlyph(pair.black.fen)}</span>
+      >{pair.black.san}{hideErrors ? "" : errorGlyph(pair.black.fen)}</span>
     {/if}
   {/each}
 </div>

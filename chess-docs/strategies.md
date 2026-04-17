@@ -1,5 +1,0 @@
-# Strategy
-
-## Basics
-
-* King Safety

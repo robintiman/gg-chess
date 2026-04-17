@@ -5,10 +5,10 @@ from pathlib import Path
 
 import chess
 import chess.engine
-import anthropic
 from flask import Blueprint, Response, current_app, g, jsonify, request, stream_with_context
 
-from ..config import ANTHROPIC_API_KEY, CLAUDE_CHAT_MODEL, STOCKFISH_PATH
+from ..analysis.llm import chat_stream
+from ..config import STOCKFISH_PATH
 from ..db import init_db
 
 bp = Blueprint("api", __name__, url_prefix="/api")
@@ -255,6 +255,10 @@ def analyse_game_route(game_db_id: int):
 
             db.execute("UPDATE games SET analysed = 1 WHERE id = ?", (game_db_id,))
             db.commit()
+
+            from ..analysis.interest import score_game_from_db
+            score_game_from_db(db, game_db_id)
+
             yield send("done", error_count=len(errors))
         except Exception as e:
             yield send("error", message=str(e))
@@ -300,6 +304,238 @@ def analyse_position():
     })
 
 
+@bp.get("/interesting-games")
+def interesting_games():
+    username = request.args.get("username", "")
+    limit = int(request.args.get("limit", 20))
+    db = get_db()
+
+    rows = db.execute(
+        """
+        SELECT g.id, g.game_id, g.source, g.result, g.time_control, g.played_at,
+               g.pgn_text, g.analysed, g.interest_score,
+               COUNT(p.id) AS error_count,
+               gr.phase AS review_phase
+        FROM players pl
+        JOIN games g ON g.player_id = pl.id
+        LEFT JOIN positions p ON p.game_id = g.id
+        LEFT JOIN game_reviews gr ON gr.game_id = g.id
+        WHERE pl.username = ?
+        GROUP BY g.id
+        ORDER BY g.interest_score DESC NULLS LAST, g.played_at DESC
+        LIMIT ?
+        """,
+        (username, limit),
+    ).fetchall()
+
+    result = []
+    for r in rows:
+        d = dict(r)
+        pgn = d.pop("pgn_text", "") or ""
+        white = _pgn_header(pgn, "White")
+        black = _pgn_header(pgn, "Black")
+        is_white = username.lower() in white.lower()
+        d["opponent"] = black if is_white else white
+        d["player_color"] = "white" if is_white else "black"
+        result.append(d)
+    return jsonify(result)
+
+
+@bp.get("/games/<int:game_db_id>/review")
+def get_review(game_db_id: int):
+    db = get_db()
+
+    review = db.execute(
+        "SELECT phase, started_at, completed_at FROM game_reviews WHERE game_id = ?",
+        (game_db_id,),
+    ).fetchone()
+
+    annotation_rows = db.execute(
+        """SELECT move_number, fen_before, user_thought, error_classification, error_type
+           FROM move_annotations WHERE game_id = ? ORDER BY move_number""",
+        (game_db_id,),
+    ).fetchall()
+
+    annotations = {str(r["move_number"]): dict(r) for r in annotation_rows}
+
+    return jsonify({
+        "phase": review["phase"] if review else None,
+        "started_at": review["started_at"] if review else None,
+        "completed_at": review["completed_at"] if review else None,
+        "annotations": annotations,
+    })
+
+
+@bp.post("/games/<int:game_db_id>/review/annotate")
+def annotate_move(game_db_id: int):
+    data = request.get_json(force=True)
+    move_number = data.get("move_number")
+    fen_before = data.get("fen_before", "")
+    user_thought = data.get("user_thought", "")
+    error_classification = data.get("error_classification", "")
+    error_type = data.get("error_type", "")
+
+    if move_number is None:
+        return jsonify({"error": "move_number required"}), 400
+
+    db = get_db()
+
+    db.execute(
+        "INSERT OR IGNORE INTO game_reviews (game_id, phase) VALUES (?, 'self_analysis')",
+        (game_db_id,),
+    )
+    db.execute(
+        """INSERT INTO move_annotations
+           (game_id, move_number, fen_before, user_thought, error_classification, error_type)
+           VALUES (?, ?, ?, ?, ?, ?)
+           ON CONFLICT(game_id, move_number) DO UPDATE SET
+               user_thought = excluded.user_thought,
+               error_classification = excluded.error_classification,
+               error_type = excluded.error_type,
+               annotated_at = CURRENT_TIMESTAMP""",
+        (game_db_id, move_number, fen_before, user_thought, error_classification, error_type),
+    )
+    db.commit()
+    return jsonify({"ok": True})
+
+
+@bp.post("/games/<int:game_db_id>/review/hint")
+def get_hint(game_db_id: int):
+    data = request.get_json(force=True)
+    fen = data.get("fen", "")
+    move_number = data.get("move_number", "?")
+    player_move = data.get("player_move", "")
+    user_thought = data.get("user_thought", "")
+
+    system = (
+        "You are a chess coach using the Socratic method. "
+        "Your ONLY job is to ask guiding questions that help the player discover the right idea themselves. "
+        "NEVER reveal the best move, engine evaluations, centipawn scores, or the solution. "
+        "Ask 1-2 short questions that direct attention to the key feature of the position. "
+        "Focus on: piece activity, king safety, material threats, or tactical motifs — "
+        "but phrase everything as questions, not answers."
+    )
+
+    prompt = (
+        f"Position (FEN): {fen}\n"
+        f"Move number: {move_number}\n"
+        f"Player's move (UCI): {player_move}\n"
+        f"Player's reasoning: {user_thought or '(not provided)'}\n\n"
+        "Ask 1-2 Socratic questions to guide the player without revealing the answer."
+    )
+
+    def generate():
+        for text in chat_stream(prompt, system=system):
+            yield f"data: {json.dumps({'text': text})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@bp.post("/games/<int:game_db_id>/review/compare")
+def compare_review(game_db_id: int):
+    data = request.get_json(force=True)
+    user_annotations = data.get("annotations", [])
+    db_path: Path = current_app.config["DB_PATH"]
+
+    def generate():
+        import sqlite3
+
+        def send(event_type, **kwargs):
+            return f"data: {json.dumps({'type': event_type, **kwargs})}\n\n"
+
+        db = init_db(db_path)
+        db.row_factory = sqlite3.Row
+
+        try:
+            engine_errors = db.execute(
+                """SELECT move_number, player_move, best_move, eval_drop_cp,
+                          win_pct_drop, move_classification, concept_name, concept_explanation
+                   FROM positions WHERE game_id = ? ORDER BY move_number""",
+                (game_db_id,),
+            ).fetchall()
+
+            engine_by_move = {r["move_number"]: dict(r) for r in engine_errors}
+            annotations_by_move = {a["move_number"]: a for a in user_annotations if "move_number" in a}
+
+            annotated_moves = sorted(set(annotations_by_move.keys()) | set(engine_by_move.keys()))
+
+            for move_num in annotated_moves:
+                user = annotations_by_move.get(move_num, {})
+                engine = engine_by_move.get(move_num)
+
+                user_thought = user.get("user_thought", "")
+                user_class = user.get("error_classification", "")
+                user_type = user.get("error_type", "")
+
+                if engine:
+                    eng_class = engine["move_classification"]
+                    eng_concept = engine["concept_name"]
+                    eng_explanation = engine["concept_explanation"]
+                    eval_drop = engine["eval_drop_cp"]
+                    best_move = engine["best_move"]
+                    player_move = engine["player_move"]
+                else:
+                    eng_class = eng_concept = eng_explanation = best_move = player_move = ""
+                    eval_drop = 0
+
+                prompt = (
+                    f"Move {move_num}: player played {player_move}, best was {best_move}.\n"
+                    f"Engine classification: {eng_class or 'none'} ({eval_drop} cp drop).\n"
+                    f"Engine concept: {eng_concept}. {eng_explanation}\n\n"
+                    f"Player's self-assessment — classification: {user_class or 'not classified'}, "
+                    f"type: {user_type or 'not specified'}, "
+                    f"reasoning: {user_thought or 'not provided'}.\n\n"
+                    "In 2-3 sentences: compare the player's assessment to reality. "
+                    "If they identified the error correctly, affirm it. "
+                    "If they missed or misclassified it, explain what they overlooked and why it matters. "
+                    "Be direct and educational."
+                )
+
+                yield send("feedback", move_number=move_num, engine_classification=eng_class,
+                           user_classification=user_class, concept=eng_concept)
+
+                feedback_text = ""
+                for text in chat_stream(prompt):
+                    feedback_text += text
+                    yield f"data: {json.dumps({'type': 'feedback_text', 'move_number': move_num, 'text': text})}\n\n"
+
+            summary_prompt = (
+                f"The player just reviewed a chess game with {len(engine_errors)} errors "
+                f"and annotated {len(annotations_by_move)} moves. "
+                "In 2-3 sentences, give an overall learning takeaway: "
+                "what pattern should they focus on improving? Be specific and encouraging."
+            )
+            yield send("summary_start")
+            for text in chat_stream(summary_prompt):
+                yield f"data: {json.dumps({'type': 'summary_text', 'text': text})}\n\n"
+
+            db.execute(
+                """INSERT INTO game_reviews (game_id, phase, completed_at)
+                   VALUES (?, 'comparison', CURRENT_TIMESTAMP)
+                   ON CONFLICT(game_id) DO UPDATE SET
+                       phase = 'comparison', completed_at = CURRENT_TIMESTAMP""",
+                (game_db_id,),
+            )
+            db.commit()
+            yield send("done")
+
+        except Exception as e:
+            yield send("error", message=str(e))
+        finally:
+            db.close()
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @bp.post("/ask")
 def ask_claude():
     data = request.get_json(force=True)
@@ -326,14 +562,8 @@ Player's question: {question}
 Provide a clear, educational explanation focused on chess improvement. Be concise but thorough."""
 
     def generate():
-        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-        with client.messages.stream(
-            model=CLAUDE_CHAT_MODEL,
-            max_tokens=1024,
-            messages=[{"role": "user", "content": prompt}],
-        ) as stream:
-            for text in stream.text_stream:
-                yield f"data: {json.dumps({'text': text})}\n\n"
+        for text in chat_stream(prompt):
+            yield f"data: {json.dumps({'text': text})}\n\n"
         yield "data: [DONE]\n\n"
 
     return Response(

@@ -1,16 +1,17 @@
 <script>
   import { onMount } from "svelte";
-  import { games, currentGame, history, currentIndex, currentAnalysis, chatMessages } from "../stores.js";
+  import { games, currentGame, history, currentIndex, currentAnalysis, chatMessages, username, appView, reviewGame, annotations, reviewPhase, comparisonResults, hintMessages } from "../stores.js";
   import { Chess } from "chess.js";
+  import { get } from "svelte/store";
 
-  const username = "jumpyfile";
   let loading = false;
   let syncStatus = "";
   let error = "";
 
-  onMount(() => syncAndFetch());
+  onMount(() => { if ($username) fetchGames(); });
 
   async function syncAndFetch() {
+    if (!$username) return;
     loading = true;
     syncStatus = "Connecting…";
     error = "";
@@ -18,7 +19,7 @@
       const res = await fetch("/api/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, max_games: 20 }),
+        body: JSON.stringify({ username: $username, max_games: 20 }),
       });
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -46,8 +47,9 @@
   }
 
   async function fetchGames() {
+    if (!$username) return;
     try {
-      const res = await fetch(`/api/games?username=${encodeURIComponent(username)}`);
+      const res = await fetch(`/api/interesting-games?username=${encodeURIComponent($username)}`);
       if (!res.ok) throw new Error("Failed to fetch games");
       games.set(await res.json());
     } catch (e) {
@@ -76,6 +78,12 @@
     currentIndex.set(0);
     currentAnalysis.set(null);
     chatMessages.set([]);
+    annotations.set({});
+    hintMessages.set({});
+    comparisonResults.set([]);
+    reviewGame.set({ ...game, ...data, hist });
+    reviewPhase.set(game.review_phase ?? null);
+    appView.set("review");
   }
 
   function formatDate(d) {
@@ -107,10 +115,13 @@
 
 <div class="game-list">
   <div class="panel-header">
-    <span class="panel-title">Recent Games</span>
-    {#if $games.length > 0}
-      <span class="game-count">{$games.length}</span>
-    {/if}
+    <span class="panel-title">Games to Review</span>
+    <div class="header-actions">
+      {#if $games.length > 0}
+        <span class="game-count">{$games.length}</span>
+      {/if}
+      <button class="sync-btn" on:click={syncAndFetch} disabled={loading} title="Sync latest games">↻</button>
+    </div>
   </div>
   {#if loading}
     <div class="loading-hint">{syncStatus || "Loading…"}</div>
@@ -146,6 +157,14 @@
             {/if}
             {#if game.error_count > 0}
               <span class="error-badge">⚠ {game.error_count}</span>
+            {/if}
+            {#if game.interest_score != null}
+              <span class="interest-badge" title="Learning value score">{Math.round(game.interest_score * 100)}%</span>
+            {/if}
+            {#if game.review_phase === "comparison"}
+              <span class="phase-badge done" title="Review complete">✓</span>
+            {:else if game.review_phase === "self_analysis"}
+              <span class="phase-badge in-progress" title="Self-analysis in progress">…</span>
             {/if}
           </div>
         </button>
@@ -287,4 +306,17 @@
   .time-control { color: var(--text-dim); }
   .error-badge { color: #e67e22; font-size: 12px; }
   .error { color: #e74c3c; padding: 8px 12px; font-size: 13px; margin: 0; }
+  .header-actions { display: flex; align-items: center; gap: 6px; }
+  .sync-btn {
+    background: none; border: 1px solid var(--border); border-radius: var(--radius-sm);
+    color: var(--text-dim); cursor: pointer; font-size: 14px; width: 24px; height: 24px;
+    display: flex; align-items: center; justify-content: center; padding: 0;
+    transition: color 0.15s, background 0.15s;
+  }
+  .sync-btn:hover:not(:disabled) { color: var(--text); background: var(--surface2); }
+  .sync-btn:disabled { opacity: 0.4; cursor: default; }
+  .interest-badge { color: var(--accent); font-size: 11px; font-weight: 600; }
+  .phase-badge { font-size: 12px; font-weight: 700; }
+  .phase-badge.done { color: var(--accent); }
+  .phase-badge.in-progress { color: #e67e22; }
 </style>
