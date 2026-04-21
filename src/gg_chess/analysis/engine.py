@@ -12,10 +12,12 @@ from ..config import (
     INACCURACY_WIN_PCT_THRESHOLD,
     MISTAKE_WIN_PCT_THRESHOLD,
     MULTI_PV_COUNT,
+    STOCKFISH_HASH,
     STOCKFISH_NODES,
     STOCKFISH_NODES_AFTER,
     STOCKFISH_NODES_SCAN,
     STOCKFISH_PATH,
+    STOCKFISH_THREADS,
 )
 from ..ingestion.parser import Game
 
@@ -94,7 +96,7 @@ def _analyse_position_task(task: dict) -> ErrorPosition | None:
     board_after = chess.Board(fen_after)
 
     with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as engine:
-        engine.configure({"Threads": 2, "Hash": 128})
+        engine.configure({"Threads": STOCKFISH_THREADS, "Hash": STOCKFISH_HASH})
 
         # ------------------------------------------------------------------
         # Pass 1: quick scan — find best move and rough eval

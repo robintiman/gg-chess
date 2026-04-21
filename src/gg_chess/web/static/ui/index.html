@@ -23,19 +23,19 @@
       --text:         #f8f8f2;
       --text-muted:   #cfcfc2;
       --text-dim:     #75715e;
-      --accent:       #a6e22e;
+      --accent:       #a6e22e;          /* Monokai green (functions) */
       --accent-2:     #c9f05c;
       --accent-muted: rgba(166,226,46,0.14);
       --accent-dim:   #7fa822;
 
-      --warn:         #fd971f;
+      --warn:         #fd971f;          /* Monokai orange (params) */
       --warn-muted:   rgba(253,151,31,0.15);
-      --danger:       #f92672;
+      --danger:       #f92672;          /* Monokai pink (keywords) */
       --danger-muted: rgba(249,38,114,0.15);
-      --info:         #66d9ef;
+      --info:         #66d9ef;          /* Monokai cyan (types) */
       --info-muted:   rgba(102,217,239,0.14);
-      --purple:       #ae81ff;
-      --yellow:       #e6db74;
+      --purple:       #ae81ff;          /* Monokai purple (numbers) */
+      --yellow:       #e6db74;          /* Monokai yellow (strings) */
 
       --square-dark:  #3e3d32;
       --square-light: #d8d4c0;
@@ -53,6 +53,7 @@
     }
 
     body.theme-light {
+      /* Monokai Light (rare but real) */
       --bg:           #fafafa;
       --bg-2:         #efefef;
       --surface:      #ffffff;
@@ -80,6 +81,7 @@
     }
 
     body.theme-editorial {
+      /* Monokai Machine — cooler, deeper */
       --bg:           #1c1e1f;
       --bg-2:         #161818;
       --surface:      #24272a;
@@ -124,6 +126,7 @@
 
     button { font: inherit; color: inherit; }
 
+    /* Utility: subtle entrance */
     @keyframes fadeUp {
       from { opacity: 0; transform: translateY(4px); }
       to   { opacity: 1; transform: none; }
@@ -133,6 +136,21 @@
 </head>
 <body>
   <div id="app"></div>
-  <script type="module" src="/src/main.jsx"></script>
+
+  <!-- React -->
+  <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+  <!-- App -->
+  <script type="text/babel" src="src/data.jsx"></script>
+  <script type="text/babel" src="src/chess-utils.jsx"></script>
+  <script type="text/babel" src="src/board.jsx"></script>
+  <script type="text/babel" src="src/evalgraph.jsx"></script>
+  <script type="text/babel" src="src/gamelist.jsx"></script>
+  <script type="text/babel" src="src/movelist.jsx"></script>
+  <script type="text/babel" src="src/coach.jsx"></script>
+  <script type="text/babel" src="src/tweaks.jsx"></script>
+  <script type="text/babel" src="src/app.jsx"></script>
 </body>
 </html>

@@ -33,11 +33,28 @@ def _pgn_header(pgn: str, tag: str) -> str:
     return m.group(1) if m else "?"
 
 
+# TODO: GET /api/patterns?username=<user> — aggregate concept_name counts across positions,
+#   grouped by concept_name, with trend (compare last 30 days vs prior 30 days).
+#   Powers the PatternInsights sidebar and PATTERN_STATS fixture.
+
+# TODO: GET /api/drills?username=<user> — generate drill suggestions from recurring error
+#   patterns (query positions by concept_name frequency, map to drill templates).
+
+# TODO: POST /api/games/<id>/review/judge — evaluate a user-proposed SAN move with Stockfish,
+#   return { verdict: "best"|"close"|"inaccurate"|"blunder"|"unknown", note: str, evalAfter: int }.
+#   Powers the Judge tab in CoachPanel.
+
 @bp.get("/games")
 def list_games():
     username = request.args.get("username", "")
     db = get_db()
 
+    # TODO: Add missing fields to this query:
+    #   - oppRating / youRating: parse WhiteElo/BlackElo from pgn_text headers
+    #   - opening / ecoCode: parse Opening/ECO from pgn_text headers
+    #   - ply: count half-moves from pgn_text and store on games row
+    #   - phase: translate game_reviews.phase (null→"unreviewed", "self_analysis"→"in_progress",
+    #            "comparison"→"done") and include in response
     rows = db.execute(
         """
         SELECT g.id, g.game_id, g.source, g.result, g.time_control, g.played_at,
@@ -75,6 +92,14 @@ def get_game(game_db_id: int):
     if game_row is None:
         return jsonify({"error": "Game not found"}), 404
 
+    # TODO: Add to /api/game/:id response:
+    #   - eval per move for every ply (not just errors): requires storing full Stockfish sweep
+    #   - move classification for all moves ("best", "good", "ok", "book"): not stored today
+    #   - clock times per move: parse [%clk h:mm:ss] comments from pgn_text
+    #   - eval_before / eval_after absolute values (not just eval_drop_cp)
+    #   - pv_san should be returned as string[] (split on space), not a space-joined string
+    #   - brilliant move detection heuristic (sacrificial move that gains ≥30% win probability)
+    #   - full annotated move-by-move transform matching the FOCAL_GAME frontend shape
     error_rows = db.execute(
         """
         SELECT fen_before, fen_after, player_move, best_move, eval_drop_cp,

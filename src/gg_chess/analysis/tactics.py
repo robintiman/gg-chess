@@ -1,13 +1,12 @@
 import json
-import time
 from pathlib import Path
 
-import anthropic
 import chess
 import chess.engine
 
 from gg_chess.analysis.engine import ErrorPosition
-from gg_chess.config import ANTHROPIC_API_KEY, CLAUDE_CONCEPT_MODEL, STOCKFISH_PATH
+from gg_chess.analysis.llm import run_tool_use_loop
+from gg_chess.config import ANTHROPIC_API_KEY, STOCKFISH_HASH, STOCKFISH_PATH, STOCKFISH_THREADS, USE_LOCAL_MODEL
 from gg_chess.ingestion.parser import Game
 
 
@@ -15,15 +14,8 @@ TACTICS_FILE = Path(__file__).parent.parent.parent.parent / "chess-docs" / "tact
 
 
 def identify_tactic(error_pos: ErrorPosition, game: Game) -> tuple[str, str]:
-    """Ask Claude to identify the tactical pattern missed in this position.
-
-    Claude can interactively query Stockfish to verify hypotheses before naming
-    a tactic. Returns (tactic_name, explanation). Both are empty strings if
-    nothing notable is found or if the API call fails.
-    """
-    if not ANTHROPIC_API_KEY:
+    if not USE_LOCAL_MODEL and not ANTHROPIC_API_KEY:
         raise RuntimeError("ANTHROPIC_API_KEY is not set")
-
     return _identify_tactic_claude(error_pos, game)
 
 
@@ -46,14 +38,6 @@ def _identify_tactic_claude(error_pos: ErrorPosition, game: Game) -> tuple[str, 
 
     best_move_context = _best_move_context(board, error_pos.pv_san)
     tactics_reference = TACTICS_FILE.read_text(encoding="utf-8") if TACTICS_FILE.exists() else ""
-
-    system_content = [
-        {
-            "type": "text",
-            "text": "You are an expert chess tactics coach. Use the following tactics reference when naming tactical patterns:\n\n" + tactics_reference,
-            "cache_control": {"type": "ephemeral"},
-        }
-    ]
 
     prompt = f"""Analyse a position where {game.username} ({user_side}) missed a tactical opportunity.
 
@@ -191,85 +175,58 @@ Only flag a tactic if it is genuinely and clearly present — the best line shou
         },
     }
 
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-    messages = [{"role": "user", "content": prompt}]
+    all_tools = [
+        get_square_info_tool,
+        get_piece_attacks_tool,
+        get_hanging_pieces_tool,
+        get_pinned_pieces_tool,
+        apply_move_tool,
+        query_stockfish_tool,
+        report_tactic_tool,
+    ]
 
     with chess.engine.SimpleEngine.popen_uci(STOCKFISH_PATH) as engine:
-        engine.configure({"Threads": 2, "Hash": 64})
+        engine.configure({"Threads": STOCKFISH_THREADS, "Hash": STOCKFISH_HASH})
 
-        for iteration in range(20):  # more tools = more calls expected before report_tactic
-            while True:
-                try:
-                    response = client.messages.create(
-                        model=CLAUDE_CONCEPT_MODEL,
-                        max_tokens=4096,
-                        temperature=0,
-                        system=system_content,
-                        tools=[
-                            get_square_info_tool,
-                            get_piece_attacks_tool,
-                            get_hanging_pieces_tool,
-                            get_pinned_pieces_tool,
-                            apply_move_tool,
-                            query_stockfish_tool,
-                            report_tactic_tool,
-                        ],
-                        tool_choice={"type": "auto"},
-                        messages=messages,
-                    )
-                    break
-                except anthropic.RateLimitError as e:
-                    retry_after = int(e.response.headers.get("retry-after", 60))
-                    print(f"[identify_tactic] rate limited, retrying in {retry_after}s")
-                    time.sleep(retry_after)
-            print(f"[identify_tactic] iter={iteration} stop_reason={response.stop_reason}")
-            for block in response.content:
-                if block.type == "text" and block.text.strip():
-                    print(f"[identify_tactic] reasoning: {block.text.strip()}")
+        def _execute_tool(name: str, inp: dict) -> dict:
+            if name == "query_stockfish":
+                result = _run_stockfish_query(engine, inp)
+                print(f"[identify_tactic] stockfish query fen={inp.get('fen', '')[:40]} -> eval={result.get('eval_cp')}")
+            elif name == "get_square_info":
+                result = _tool_get_square_info(inp.get("fen", ""), inp.get("square", ""))
+                print(f"[identify_tactic] get_square_info {inp.get('square')} -> {result.get('piece')}")
+            elif name == "get_piece_attacks":
+                result = _tool_get_piece_attacks(inp.get("fen", ""), inp.get("square", ""))
+                print(f"[identify_tactic] get_piece_attacks {inp.get('square')} -> {result.get('attacks')}")
+            elif name == "get_hanging_pieces":
+                result = _tool_get_hanging_pieces(inp.get("fen", ""))
+                print(f"[identify_tactic] get_hanging_pieces -> {result.get('hanging')}")
+            elif name == "get_pinned_pieces":
+                result = _tool_get_pinned_pieces(inp.get("fen", ""), inp.get("color", "white"))
+                print(f"[identify_tactic] get_pinned_pieces {inp.get('color')} -> {result.get('pinned')}")
+            elif name == "apply_move":
+                result = _tool_apply_move(inp.get("fen", ""), inp.get("move", ""))
+                print(f"[identify_tactic] apply_move {inp.get('move')} -> check={result.get('gives_check')} capture={result.get('is_capture')}")
+            else:
+                result = {"error": f"Unknown tool: {name}"}
+            return result
 
-            tool_uses = [b for b in response.content if b.type == "tool_use"]
-            if not tool_uses:
-                break
+        system_text = "You are an expert chess tactics coach. Use the following tactics reference when naming tactical patterns:\n\n" + tactics_reference
+        data = run_tool_use_loop(
+            system_text=system_text,
+            user_prompt=prompt,
+            tools=all_tools,
+            tool_executor=_execute_tool,
+            terminal_tool="report_tactic",
+            max_iters=20,
+            log_prefix="identify_tactic",
+        )
 
-            report = next((b for b in tool_uses if b.name == "report_tactic"), None)
-            if report:
-                data = report.input
-                print(f"[identify_tactic] response: {data!r}")
-                missing = data.get("missing_info", "")
-                if missing:
-                    print(f"[identify_tactic] missing info: {missing}")
-                return (data.get("name", ""), data.get("explanation", ""))
-
-            messages.append({"role": "assistant", "content": response.content})
-            tool_results = []
-            for tu in tool_uses:
-                if tu.name == "query_stockfish":
-                    result = _run_stockfish_query(engine, tu.input)
-                    print(f"[identify_tactic] stockfish query fen={tu.input.get('fen', '')[:40]} -> eval={result.get('eval_cp')}")
-                elif tu.name == "get_square_info":
-                    result = _tool_get_square_info(tu.input.get("fen", ""), tu.input.get("square", ""))
-                    print(f"[identify_tactic] get_square_info {tu.input.get('square')} -> {result.get('piece')}")
-                elif tu.name == "get_piece_attacks":
-                    result = _tool_get_piece_attacks(tu.input.get("fen", ""), tu.input.get("square", ""))
-                    print(f"[identify_tactic] get_piece_attacks {tu.input.get('square')} -> {result.get('attacks')}")
-                elif tu.name == "get_hanging_pieces":
-                    result = _tool_get_hanging_pieces(tu.input.get("fen", ""))
-                    print(f"[identify_tactic] get_hanging_pieces -> {result.get('hanging')}")
-                elif tu.name == "get_pinned_pieces":
-                    result = _tool_get_pinned_pieces(tu.input.get("fen", ""), tu.input.get("color", "white"))
-                    print(f"[identify_tactic] get_pinned_pieces {tu.input.get('color')} -> {result.get('pinned')}")
-                elif tu.name == "apply_move":
-                    result = _tool_apply_move(tu.input.get("fen", ""), tu.input.get("move", ""))
-                    print(f"[identify_tactic] apply_move {tu.input.get('move')} -> check={result.get('gives_check')} capture={result.get('is_capture')}")
-                else:
-                    result = {"error": f"Unknown tool: {tu.name}"}
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": tu.id,
-                    "content": json.dumps(result),
-                })
-            messages.append({"role": "user", "content": tool_results})
-
+    if data:
+        missing = data.get("missing_info", "")
+        if missing:
+            print(f"[identify_tactic] missing info: {missing}")
+        return (data.get("name", ""), data.get("explanation", ""))
     return ("", "")
 
 
