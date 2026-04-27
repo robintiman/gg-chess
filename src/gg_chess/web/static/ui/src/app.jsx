@@ -12,9 +12,10 @@ const DEFAULT_TWEAKS = /*EDITMODE-BEGIN*/{
 
 function App() {
   // Core state
-  const [activeGameId, setActiveGameId] = useState("g-2026-04-18");
-  const [currentPly, setCurrentPly] = useState(31); // Start on the first critical (move 16 white = ply 31)
+  const [activeGameId, setActiveGameId] = useState(null);
+  const [currentPly, setCurrentPly] = useState(31);
   const [flipped, setFlipped] = useState(false);
+  const [lastFlippedForGame, setLastFlippedForGame] = useState(null);
   const [blindMode, setBlindMode] = useState(true);
   const [annotations, setAnnotations] = useState({}); // {ply: {thought, classification}}
   const [proposedArrow, setProposedArrow] = useState(null); // {from, to, color}
@@ -47,6 +48,92 @@ function App() {
     window.parent?.postMessage({ type: "__edit_mode_available" }, "*");
     return () => window.removeEventListener("message", handler);
   }, []);
+
+  const [username, setUsername] = useState(() => localStorage.getItem("gg_username") || "");
+  const [games, setGames] = useState([]);
+  const [syncing, setSyncing] = useState(false);
+
+  function changeUsername(u) {
+    setUsername(u);
+    localStorage.setItem("gg_username", u);
+  }
+
+  async function fetchGames(user) {
+    if (!user) return;
+    try {
+      const res = await fetch(`/api/games?username=${encodeURIComponent(user)}`);
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        const mapped = data.map(g => {
+          const isWhite = g.player_color === "white";
+          const result = g.result === "1-0" ? (isWhite ? "win" : "loss")
+                       : g.result === "0-1" ? (isWhite ? "loss" : "win")
+                       : "draw";
+          return {
+            id: g.id,
+            opponent: g.opponent || "?",
+            oppRating: null,
+            youRating: null,
+            result,
+            color: g.player_color,
+            timeControl: g.time_control || "",
+            playedAt: (g.played_at || "").split(" ")[0],
+            ply: 0,
+            errorCount: g.error_count || 0,
+            interest: 0.5,
+            opening: "",
+            phase: "unreviewed",
+          };
+        });
+        setGames(mapped);
+        setActiveGameId(prev => prev === null ? mapped[0].id : prev);
+      }
+    } catch (e) {
+      console.error("fetchGames failed", e);
+    }
+  }
+
+  async function handleSync() {
+    if (!username || syncing) return;
+    setSyncing(true);
+    try {
+      const res = await fetch("/api/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username }),
+      });
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split("\n");
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          const ev = JSON.parse(line.slice(6));
+          if (ev.type === "done") fetchGames(username);
+        }
+      }
+    } catch (e) {
+      console.error("sync failed", e);
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  useEffect(() => { fetchGames(username); }, [username]);
+
+  // Auto-flip to match player color whenever the active game changes.
+  // Using render-phase state update so the flip is applied immediately
+  // with no intermediate render showing the wrong orientation.
+  const activeGame = games.find(g => g.id === activeGameId) ?? null;
+  if (activeGame && activeGame.id !== lastFlippedForGame) {
+    setLastFlippedForGame(activeGame.id);
+    setFlipped(activeGame.color === "black");
+  }
 
   const game = FOCAL_GAME;
   const plies = FOCAL_PLIES;
@@ -208,7 +295,9 @@ function App() {
 
       <div className="app-body" data-layout={tweaks.coachPosition}>
         <aside className="col-games">
-          <GameList games={SAMPLE_GAMES} activeId={activeGameId} onSelect={setActiveGameId} />
+          <GameList games={games} activeId={activeGameId} onSelect={setActiveGameId}
+                    username={username} onUsernameChange={changeUsername}
+                    onSync={handleSync} syncing={syncing} />
           <PatternInsights />
         </aside>
 

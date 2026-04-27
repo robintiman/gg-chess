@@ -1,6 +1,17 @@
 // Game list sidebar. Shows recent games ranked by learning value.
 
-function GameList({ games, activeId, onSelect }) {
+function GameList({ games, activeId, onSelect, username, onUsernameChange, onSync, syncing }) {
+  const [editingUser, setEditingUser] = React.useState(false);
+  const [draftUser, setDraftUser] = React.useState(username || "");
+
+  function commitUsername() {
+    setEditingUser(false);
+    const u = draftUser.trim();
+    if (u && u !== username) onUsernameChange && onUsernameChange(u);
+  }
+
+  const initials = username ? username.slice(0, 2).toLowerCase() : "?";
+
   return (
     <div className="gl-root">
       <div className="gl-header">
@@ -8,7 +19,10 @@ function GameList({ games, activeId, onSelect }) {
           <span className="gl-title-main">Recent games</span>
           <span className="gl-title-sub">ranked by learning value</span>
         </div>
-        <button className="gl-sync" title="Sync with chess.com">
+        <button className={`gl-sync${syncing ? " gl-sync-spinning" : ""}`}
+                title={username ? "Sync with chess.com" : "Set username to sync"}
+                onClick={() => onSync && onSync()}
+                disabled={syncing || !username}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="23 4 23 10 17 10" />
             <polyline points="1 20 1 14 7 14" />
@@ -17,11 +31,24 @@ function GameList({ games, activeId, onSelect }) {
         </button>
       </div>
 
-      <div className="gl-user-chip">
-        <div className="gl-avatar">jm</div>
+      <div className="gl-user-chip" onClick={() => { setEditingUser(true); setDraftUser(username || ""); }} title="Click to edit username">
+        <div className="gl-avatar">{initials}</div>
         <div className="gl-user-meta">
-          <div className="gl-user-name">jmarcus</div>
-          <div className="gl-user-stats">1584 · 24 games this month</div>
+          {editingUser ? (
+            <input
+              className="gl-user-input"
+              value={draftUser}
+              autoFocus
+              placeholder="chess.com username"
+              onChange={e => setDraftUser(e.target.value)}
+              onBlur={commitUsername}
+              onKeyDown={e => { if (e.key === "Enter") commitUsername(); if (e.key === "Escape") setEditingUser(false); }}
+              onClick={e => e.stopPropagation()}
+            />
+          ) : (
+            <div className="gl-user-name">{username || <span className="gl-user-placeholder">click to set username</span>}</div>
+          )}
+          <div className="gl-user-stats">{games.length} games synced</div>
         </div>
       </div>
 
@@ -58,9 +85,26 @@ function GameList({ games, activeId, onSelect }) {
           cursor: pointer;
           transition: color 0.15s, background 0.15s, border-color 0.15s;
         }
-        .gl-sync:hover {
+        .gl-sync:hover:not(:disabled) {
           color: var(--text); background: var(--surface-2); border-color: var(--border-2);
         }
+        .gl-sync:disabled { opacity: 0.4; cursor: default; }
+        @keyframes gl-spin { to { transform: rotate(360deg); } }
+        .gl-sync-spinning svg { animation: gl-spin 0.8s linear infinite; }
+        .gl-user-chip { cursor: pointer; }
+        .gl-user-chip:hover { background: var(--surface-2); }
+        .gl-user-input {
+          width: 100%;
+          background: var(--surface-2);
+          border: 1px solid var(--accent-dim);
+          border-radius: var(--radius-sm);
+          color: var(--text);
+          font: inherit;
+          font-size: 12px;
+          padding: 2px 6px;
+          outline: none;
+        }
+        .gl-user-placeholder { color: var(--text-dim); font-style: italic; }
         .gl-user-chip {
           display: flex; align-items: center; gap: 10px;
           padding: 10px 16px;
@@ -211,7 +255,8 @@ function LearningPip({ value }) {
 
 function shortDate(iso) {
   const d = new Date(iso + "T00:00:00");
-  const today = new Date("2026-04-19");
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
   const diff = Math.round((today - d) / (86400 * 1000));
   if (diff === 0) return "Today";
   if (diff === 1) return "Yesterday";

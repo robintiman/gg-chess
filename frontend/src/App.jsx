@@ -1,7 +1,7 @@
 // Main app. Composes game list + workspace + coach rail.
 import { useState, useMemo, useEffect, useCallback, useRef, useLayoutEffect } from "react";
+import { Chess } from "chess.js";
 import { PATTERN_STATS, transformGameList, transformGameResponse, flattenPlies } from "./data";
-import { boardAtPly, sanDest } from "./chess-utils";
 import Board, { EvalBar } from "./Board";
 import EvalGraph from "./EvalGraph";
 import GameList from "./GameList";
@@ -31,7 +31,6 @@ export default function App() {
   const [flipped, setFlipped] = useState(false);
   const [blindMode, setBlindMode] = useState(true);
   const [annotations, setAnnotations] = useState({});
-  const [proposedArrow, setProposedArrow] = useState(null);
   const [tweakOpen, setTweakOpen] = useState(false);
   const [tweaks, setTweaksRaw] = useState(DEFAULT_TWEAKS);
   const [editMode, setEditMode] = useState(false);
@@ -177,7 +176,23 @@ export default function App() {
   const plies = gameDetail?.plies ?? [];
   const criticalPlies = gameDetail?.criticalPlies ?? [];
 
-  const board = useMemo(() => boardAtPly(plies, currentPly), [currentPly, plies]);
+  const [fens, lastMoves] = useMemo(() => {
+    const chess = new Chess();
+    const fens = [chess.fen()];
+    const lastMoves = [null];
+    for (let i = 1; i < plies.length; i++) {
+      try {
+        const move = chess.move(plies[i].san);
+        lastMoves.push(move ? { from: move.from, to: move.to } : null);
+      } catch (_) {
+        lastMoves.push(null);
+      }
+      fens.push(chess.fen());
+    }
+    return [fens, lastMoves];
+  }, [plies]);
+
+  const fen = fens[currentPly] ?? "start";
   const plyInfo = plies[currentPly];
 
   const moveData = useMemo(() => {
@@ -187,11 +202,7 @@ export default function App() {
     return plyInfo.color === "w" ? pair.white : pair.black;
   }, [plyInfo, game]);
 
-  const lastMove = useMemo(() => {
-    if (currentPly <= 0) return null;
-    const dest = sanDest(plies[currentPly]?.san);
-    return dest ? { to: dest } : null;
-  }, [currentPly, plies]);
+  const lastMove = lastMoves[currentPly] ?? null;
 
   const engineArrows = useMemo(() => {
     if (blindMode || !moveData?.isCritical) return [];
@@ -204,8 +215,6 @@ export default function App() {
     }
     return arrows;
   }, [blindMode, moveData]);
-
-  const allArrows = proposedArrow ? [...engineArrows, proposedArrow] : engineArrows;
 
   const highlight = moveData?.isCritical ? moveData.square : null;
   const highlightKind = blindMode ? "critical" : "best";
@@ -236,7 +245,6 @@ export default function App() {
 
   const seek = useCallback((p) => {
     setCurrentPly(Math.max(0, Math.min(plies.length - 1, p)));
-    setProposedArrow(null);
   }, [plies.length]);
 
   useEffect(() => {
@@ -257,11 +265,6 @@ export default function App() {
       ? criticalPlies.find((p) => p > currentPly) ?? criticalPlies[criticalPlies.length - 1]
       : [...criticalPlies].reverse().find((p) => p < currentPly) ?? criticalPlies[0];
     seek(target);
-  }
-
-  function onProposeMove(att) {
-    // TODO: When /api/games/:id/review/judge is implemented, compute arrow from UCI response
-    setProposedArrow(null);
   }
 
   function updateAnnotation(ply, field, val) {
@@ -322,9 +325,9 @@ export default function App() {
                 <div className="ws-board-area">
                   <EvalBar evalCp={blindMode ? 0 : (plyInfo?.eval ?? 0)} height={boardSize} flipped={flipped} />
                   <div className="board-stack">
-                    <Board board={board} flipped={flipped} size={boardSize}
+                    <Board fen={fen} flipped={flipped} size={boardSize}
                       lastMove={lastMove} highlight={highlight} highlightKind={highlightKind}
-                      arrows={allArrows} annotations={[]} />
+                      arrows={engineArrows} />
                     <BoardFooter plyInfo={plyInfo} currentPly={currentPly} total={plies.length - 1}
                       onSeek={seek} setFlipped={setFlipped} flipped={flipped} />
                   </div>

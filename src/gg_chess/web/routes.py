@@ -533,7 +533,7 @@ def compare_review(game_db_id: int):
 
 
 @bp.post("/ask")
-def ask_claude():
+def ask():
     data = request.get_json(force=True)
     fen = data.get("fen", "")
     player_move = data.get("player_move", "")

@@ -4,6 +4,7 @@ from collections.abc import Callable, Iterator
 
 import anthropic
 import openai
+from ollama import chat
 
 from gg_chess.config import (
     ANTHROPIC_API_KEY,
@@ -45,7 +46,7 @@ def run_tool_use_loop(
 
 def chat_stream(prompt: str, system: str | None = None) -> Iterator[str]:
     if USE_LOCAL_MODEL:
-        yield from _chat_stream_openai(prompt, system=system)
+        yield from _chat_stream_local(prompt, system=system)
     else:
         yield from _chat_stream_anthropic(prompt, system=system)
 
@@ -196,20 +197,28 @@ def _tool_use_loop_openai(
     return None
 
 
-def _chat_stream_openai(prompt: str, system: str | None = None) -> Iterator[str]:
-    client = _openai_client()
+def _chat_stream_local(prompt: str, system: str | None = None) -> Iterator[str]:
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
-    stream = client.chat.completions.create(
+
+    stream = chat(
         model=LOCAL_MODEL_NAME,
-        max_tokens=4096,
         messages=messages,
         stream=True,
-        extra_body={"think": False},
+        think=True,
     )
+
+    in_thinking = False
     for chunk in stream:
-        delta = chunk.choices[0].delta.content
-        if delta:
-            yield delta
+        if chunk.message.thinking:
+            if not in_thinking:
+                in_thinking = True
+                print("[thinking]", flush=True)
+            print(chunk.message.thinking, end="", flush=True)
+        elif chunk.message.content:
+            if in_thinking:
+                in_thinking = False
+                print("\n[/thinking]", flush=True)
+            yield chunk.message.content

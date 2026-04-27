@@ -21,7 +21,6 @@ CREATE TABLE IF NOT EXISTS games (
     played_at TIMESTAMP,
     pgn_text TEXT NOT NULL,
     analysed INTEGER DEFAULT 0,
-    interest_score REAL,
     UNIQUE(game_id, source)
 );
 
@@ -45,7 +44,6 @@ CREATE TABLE IF NOT EXISTS positions (
 CREATE TABLE IF NOT EXISTS game_reviews (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     game_id INTEGER NOT NULL REFERENCES games(id) ON DELETE CASCADE,
-    phase TEXT NOT NULL DEFAULT 'self_analysis',
     started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMP,
     UNIQUE(game_id)
