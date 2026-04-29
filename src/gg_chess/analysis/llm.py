@@ -3,20 +3,18 @@ import time
 from collections.abc import Callable, Iterator
 
 import anthropic
-import openai
-from ollama import chat
+import ollama
 
 from gg_chess.config import (
     ANTHROPIC_API_KEY,
     CLAUDE_CHAT_MODEL,
     CLAUDE_CONCEPT_MODEL,
-    LOCAL_MODEL_BASE_URL,
     LOCAL_MODEL_NAME,
     USE_LOCAL_MODEL,
 )
 
 
-def _anthropic_to_openai_tools(tools: list[dict]) -> list[dict]:
+def _to_ollama_tools(tools: list[dict]) -> list[dict]:
     return [
         {
             "type": "function",
@@ -40,13 +38,13 @@ def run_tool_use_loop(
     log_prefix: str = "llm",
 ) -> dict | None:
     if USE_LOCAL_MODEL:
-        return _tool_use_loop_openai(system_text, user_prompt, tools, tool_executor, terminal_tool, max_iters, log_prefix)
+        return _tool_use_loop_ollama(system_text, user_prompt, tools, tool_executor, terminal_tool, max_iters, log_prefix)
     return _tool_use_loop_anthropic(system_text, user_prompt, tools, tool_executor, terminal_tool, max_iters, log_prefix)
 
 
 def chat_stream(prompt: str, system: str | None = None) -> Iterator[str]:
     if USE_LOCAL_MODEL:
-        yield from _chat_stream_local(prompt, system=system)
+        yield from _chat_stream_ollama(prompt, system=system)
     else:
         yield from _chat_stream_anthropic(prompt, system=system)
 
@@ -121,13 +119,9 @@ def _chat_stream_anthropic(prompt: str, system: str | None = None) -> Iterator[s
         yield from stream.text_stream
 
 
-# ── OpenAI / Ollama backend ────────────────────────────────────────────────────
+# ── Ollama backend ─────────────────────────────────────────────────────────────
 
-def _openai_client() -> openai.OpenAI:
-    return openai.OpenAI(base_url=LOCAL_MODEL_BASE_URL, api_key="ollama")
-
-
-def _tool_use_loop_openai(
+def _tool_use_loop_ollama(
     system_text: str,
     user_prompt: str,
     tools: list[dict],
@@ -136,74 +130,49 @@ def _tool_use_loop_openai(
     max_iters: int,
     log_prefix: str,
 ) -> dict | None:
-    client = _openai_client()
-    oai_tools = _anthropic_to_openai_tools(tools)
-    messages: list[dict] = [
+    ollama_tools = _to_ollama_tools(tools)
+    messages: list = [
         {"role": "system", "content": system_text},
         {"role": "user", "content": user_prompt},
     ]
 
     for iteration in range(max_iters):
-        response = client.chat.completions.create(
+        response = ollama.chat(
             model=LOCAL_MODEL_NAME,
-            max_tokens=8192,
-            temperature=0,
-            tools=oai_tools,
-            tool_choice="auto",
             messages=messages,
-            extra_body={"think": False},
+            tools=ollama_tools,
+            think=False,
         )
-        choice = response.choices[0]
-        finish_reason = choice.finish_reason
-        print(f"[{log_prefix}] iter={iteration} finish_reason={finish_reason}")
+        print(f"[{log_prefix}] iter={iteration} done_reason={response.done_reason}")
 
-        text_content = choice.message.content or ""
-        if text_content.strip():
-            print(f"[{log_prefix}] reasoning: {text_content.strip()}")
+        content = response.message.content or ""
+        if content.strip():
+            print(f"[{log_prefix}] reasoning: {content.strip()}")
 
-        tool_calls = choice.message.tool_calls or []
+        tool_calls = response.message.tool_calls or []
         if not tool_calls:
             break
 
         terminal = next((tc for tc in tool_calls if tc.function.name == terminal_tool), None)
         if terminal:
-            data = json.loads(terminal.function.arguments)
-            print(f"[{log_prefix}] {terminal_tool}: {data!r}")
-            return data
+            print(f"[{log_prefix}] {terminal_tool}: {terminal.function.arguments!r}")
+            return terminal.function.arguments
 
-        # Add assistant message with tool_calls
-        messages.append({
-            "role": "assistant",
-            "content": text_content or None,
-            "tool_calls": [
-                {
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {"name": tc.function.name, "arguments": tc.function.arguments},
-                }
-                for tc in tool_calls
-            ],
-        })
-
+        messages.append(response.message)
         for tc in tool_calls:
-            inp = json.loads(tc.function.arguments)
-            result = tool_executor(tc.function.name, inp)
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tc.id,
-                "content": json.dumps(result),
-            })
+            result = tool_executor(tc.function.name, tc.function.arguments)
+            messages.append({"role": "tool", "tool_name": tc.function.name, "content": json.dumps(result)})
 
     return None
 
 
-def _chat_stream_local(prompt: str, system: str | None = None) -> Iterator[str]:
+def _chat_stream_ollama(prompt: str, system: str | None = None) -> Iterator[str]:
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
 
-    stream = chat(
+    stream = ollama.chat(
         model=LOCAL_MODEL_NAME,
         messages=messages,
         stream=True,

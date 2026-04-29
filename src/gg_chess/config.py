@@ -33,6 +33,5 @@ CLAUDE_CONCEPT_MODEL: str = "claude-haiku-4-5-20251001"  # Fast model for struct
 CLAUDE_CHAT_MODEL: str = "claude-opus-4-6"               # High-quality model for interactive chat
 
 USE_LOCAL_MODEL: bool = os.getenv("USE_LOCAL_MODEL", "false").lower() == "true"
-LOCAL_MODEL_BASE_URL: str = os.getenv("LOCAL_MODEL_BASE_URL", "http://localhost:11434/v1")
 LOCAL_MODEL_NAME: str = os.getenv("LOCAL_MODEL_NAME", "qwen3:30b")
 MULTI_PV_COUNT: int = 3
